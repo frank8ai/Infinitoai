@@ -199,30 +199,43 @@
     const localPart = options.localPart
       ? String(options.localPart).trim().replace(/[^a-z0-9._-]/gi, '').toLowerCase()
       : generateCloudMailLocalPart(options);
-    const domain = options.domain
+    const preferredDomain = options.domain
       ? String(options.domain).trim().replace(/^@+/, '').toLowerCase()
-      : pickRandomItem(config.domains, typeof options.randomFn === 'function' ? options.randomFn : Math.random);
-    const resolvedDomain = config.subdomain ? `${config.subdomain}.${domain}` : domain;
-    const response = await runWithTimeout(() => doFetch(`${config.baseUrl}/admin/new_address`, {
-      method: 'POST',
-      headers: buildCloudMailHeaders(config),
-      body: JSON.stringify({
-        enablePrefix: false,
-        name: localPart,
-        domain: resolvedDomain,
-      }),
-    }), config.timeoutMs, 'CloudMail address request');
-    const json = await parseJsonResponse(response, 'CloudMail address request');
-    const address = String(json.address || json.email || json.data?.address || '').trim();
-    if (!address) {
-      throw new Error('CloudMail address request did not return an address.');
+      : '';
+    const domains = preferredDomain
+      ? [preferredDomain, ...config.domains.filter((domain) => domain !== preferredDomain)]
+      : config.domains.slice();
+    let lastError = null;
+
+    for (const domain of domains) {
+      const resolvedDomain = config.subdomain ? `${config.subdomain}.${domain}` : domain;
+      try {
+        const response = await runWithTimeout(() => doFetch(`${config.baseUrl}/admin/new_address`, {
+          method: 'POST',
+          headers: buildCloudMailHeaders(config),
+          body: JSON.stringify({
+            enablePrefix: false,
+            name: localPart,
+            domain: resolvedDomain,
+          }),
+        }), config.timeoutMs, 'CloudMail address request');
+        const json = await parseJsonResponse(response, 'CloudMail address request');
+        const address = String(json.address || json.email || json.data?.address || '').trim();
+        if (!address) {
+          throw new Error('CloudMail address request did not return an address.');
+        }
+        return {
+          ok: true,
+          email: address,
+          jwt: String(json.jwt || json.data?.jwt || '').trim(),
+          id: String(json.id || json.address_id || json.data?.id || json.data?.address_id || address),
+        };
+      } catch (err) {
+        lastError = err;
+      }
     }
-    return {
-      ok: true,
-      email: address,
-      jwt: String(json.jwt || json.data?.jwt || '').trim(),
-      id: String(json.id || json.address_id || json.data?.id || json.data?.address_id || address),
-    };
+
+    throw lastError || new Error('CloudMail address request failed.');
   }
 
   async function fetchCloudMailList(configValue = {}, email, options = {}) {

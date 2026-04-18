@@ -26,7 +26,8 @@
     "https://mail.qq.com/*",
     "https://wx.mail.qq.com/*",
     "https://mail.163.com/*",
-    "https://duckduckgo.com/email/settings/autofill*"
+    "https://duckduckgo.com/email/settings/autofill*",
+    "https://temp-email-api.bitpowerhub.com/*"
   ],
   "optional_host_permissions": [
     "http://*/*",

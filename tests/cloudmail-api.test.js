@@ -77,6 +77,32 @@ test('createCloudMailEmail creates an address through the self-hosted admin API'
   assert.equal(calls[0].url, 'https://mail.example.com/admin/new_address');
 });
 
+test('createCloudMailEmail retries the next configured domain after a rejected domain', async () => {
+  const requestedDomains = [];
+  const result = await createCloudMailEmail({
+    baseUrl: 'https://mail.example.com',
+    adminPassword: 'secret',
+    domains: 'bad.example.com,good.example.com',
+  }, {
+    localPart: 'duckbridge02',
+    fetchImpl: async (_url, options = {}) => {
+      const body = JSON.parse(options.body);
+      requestedDomains.push(body.domain);
+      if (body.domain === 'bad.example.com') {
+        return createJsonResponse({ error: 'invalid domain' }, 400);
+      }
+      return createJsonResponse({
+        address: 'duckbridge02@good.example.com',
+        jwt: 'jwt-2',
+        id: 'addr-2',
+      });
+    },
+  });
+
+  assert.equal(result.email, 'duckbridge02@good.example.com');
+  assert.deepEqual(requestedDomains, ['bad.example.com', 'good.example.com']);
+});
+
 test('pollCloudMailVerificationCode polls newest matching OpenAI mail through the admin API and skips excluded codes', async () => {
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
