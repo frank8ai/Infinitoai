@@ -54,12 +54,22 @@ test('background includes fingerprint bridge lifecycle helpers and step dispatch
   assert.match(backgroundSource, /async function stopFingerprintBridgeRunIfNeeded\(state = null\)/);
   assert.match(backgroundSource, /async function deleteFingerprintBridgeRunIfNeeded\(state = null\)/);
   assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*completeFingerprintBridgeStep\(2,\s*state/i);
-  assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*completeFingerprintBridgeStep\(3,\s*state/i);
+  assert.match(backgroundSource, /const preparedState = await prepareStep3Credentials\(state\);[\s\S]*if \(isFingerprintBrowserBackend\(preparedState\)\) \{[\s\S]*completeFingerprintBridgeStep\(3,\s*preparedState/i);
   assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*executeVerificationMailStep\(4,\s*state/i);
   assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*completeFingerprintBridgeStep\(5,\s*state/i);
   assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*completeFingerprintBridgeStep\(6,\s*state/i);
   assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*executeVerificationMailStep\(7,\s*state/i);
   assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*completeFingerprintBridgeStep\(8,\s*state/i);
+});
+
+test('fingerprint step 3 prepares generated mailbox sources before calling the bridge', () => {
+  const backgroundSource = readProjectFile('background.js');
+
+  assert.match(backgroundSource, /async function prepareStep3Credentials\(state\)/);
+  assert.match(
+    backgroundSource,
+    /const preparedState = await prepareStep3Credentials\(state\);[\s\S]*if \(isFingerprintBrowserBackend\(preparedState\)\) \{[\s\S]*completeFingerprintBridgeStep\(3,\s*preparedState,\s*\{[\s\S]*email:\s*preparedState\.email[\s\S]*password:\s*preparedState\.password/i
+  );
 });
 
 test('signup page accepts chatgpt auth entry as a valid registration entry point', () => {

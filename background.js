@@ -4482,13 +4482,7 @@ async function waitForStep2CompletionSignalOrAuthPageReady(initialState = {}) {
 // Step 3: Fill Email and request the signup one-time code (via signup-page.js)
 // ============================================================
 
-async function executeStep3(state) {
-  if (isFingerprintBrowserBackend(state)) {
-    await addLog('第 3 步：正在通过指纹浏览器填写邮箱和密码...', 'info');
-    await completeFingerprintBridgeStep(3, state);
-    return;
-  }
-
+async function prepareStep3Credentials(state) {
   const emailSource = getCurrentEmailSource(state);
   const activeTmailorLease = getActiveTmailorEmailLease(state);
   let email = emailSource === 'tmailor' && activeTmailorLease?.email
@@ -4548,13 +4542,35 @@ async function executeStep3(state) {
     mailProvider: state.mailProvider,
   });
 
-  await addLog(`第 3 步：正在填写邮箱 ${email}，点击 Continue，并请求一次性验证码...`);
+  return {
+    ...(await getState()),
+    email,
+    password,
+  };
+}
+
+async function executeStep3(state) {
+  const preparedState = await prepareStep3Credentials(state);
+
+  if (isFingerprintBrowserBackend(preparedState)) {
+    await addLog(`第 3 步：正在通过指纹浏览器填写邮箱 ${preparedState.email} 并提交密码...`, 'info');
+    await completeFingerprintBridgeStep(3, preparedState, {
+      email: preparedState.email,
+      password: preparedState.password,
+    });
+    return;
+  }
+
+  await addLog(`第 3 步：正在填写邮箱 ${preparedState.email}，点击 Continue，并请求一次性验证码...`);
   try {
     await sendToContentScript('signup-page', {
       type: 'EXECUTE_STEP',
       step: 3,
       source: 'background',
-      payload: { email, password },
+      payload: {
+        email: preparedState.email,
+        password: preparedState.password,
+      },
     });
   } catch (err) {
     const errorMessage = err?.message || String(err || '');
