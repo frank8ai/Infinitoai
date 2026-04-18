@@ -41,6 +41,9 @@
     if (parsed.hostname === 'platform.openai.com') {
       return /^\/(login|chat)(\/|$)/.test(parsed.pathname);
     }
+    if (parsed.hostname === 'chatgpt.com') {
+      return /^\/auth\/login(\/|$)/.test(parsed.pathname);
+    }
     return parsed.hostname === 'auth0.openai.com'
       || parsed.hostname === 'auth.openai.com'
       || parsed.hostname === 'accounts.openai.com';

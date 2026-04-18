@@ -6,15 +6,22 @@ const {
   DEFAULT_AUTO_RUN_COUNT,
   DEFAULT_AUTO_RUN_INFINITE,
   DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
+  DEFAULT_BROWSER_BACKEND,
   DEFAULT_EMAIL_SOURCE,
+  DEFAULT_FINGERPRINT_PROVIDER,
+  DEFAULT_ROXY_API_BASE_URL,
+  DEFAULT_SIGNUP_ENTRY,
   getAutoContinueHint,
   getEmailInputPlaceholder,
   PERSISTED_TOP_SETTING_KEYS,
   normalizePersistentSettings,
   sanitizeAutoRunCount,
   sanitizeAutoRotateMailProvider,
+  sanitizeBrowserBackend,
   sanitizeEmailSource,
+  sanitizeFingerprintProvider,
   sanitizeInfiniteAutoRun,
+  sanitizeSignupEntry,
 } = require('../shared/sidepanel-settings.js');
 
 test('sanitizeAutoRunCount keeps positive integers', () => {
@@ -45,6 +52,15 @@ test('sanitizeEmailSource falls back to tmailor for unsupported values', () => {
   assert.equal(sanitizeEmailSource('other'), DEFAULT_EMAIL_SOURCE);
 });
 
+test('entry and browser backend sanitizers keep supported values', () => {
+  assert.equal(sanitizeSignupEntry('chatgpt'), 'chatgpt');
+  assert.equal(sanitizeSignupEntry('other'), DEFAULT_SIGNUP_ENTRY);
+  assert.equal(sanitizeBrowserBackend('fingerprint'), 'fingerprint');
+  assert.equal(sanitizeBrowserBackend('other'), DEFAULT_BROWSER_BACKEND);
+  assert.equal(sanitizeFingerprintProvider('roxy'), 'roxy');
+  assert.equal(sanitizeFingerprintProvider('other'), DEFAULT_FINGERPRINT_PROVIDER);
+});
+
 test('sanitizeAutoRotateMailProvider coerces booleans safely', () => {
   assert.equal(sanitizeAutoRotateMailProvider(true), true);
   assert.equal(sanitizeAutoRotateMailProvider(false), false);
@@ -57,6 +73,12 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
   assert.deepEqual(
     normalizePersistentSettings({
       vpsUrl: 'http://127.0.0.1:3000',
+      signupEntry: 'chatgpt',
+      browserBackend: 'fingerprint',
+      fingerprintProvider: 'roxy',
+      roxyApiBaseUrl: ' http://127.0.0.1:50000/ ',
+      roxyApiToken: 'token-1',
+      roxyWorkspaceId: 42,
       mailProvider: 'inbucket',
       emailSource: '33mail',
       mailDomainSettings: {
@@ -83,6 +105,12 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
     }),
     {
       vpsUrl: 'http://127.0.0.1:3000',
+      signupEntry: 'chatgpt',
+      browserBackend: 'fingerprint',
+      fingerprintProvider: 'roxy',
+      roxyApiBaseUrl: ' http://127.0.0.1:50000/ ',
+      roxyApiToken: 'token-1',
+      roxyWorkspaceId: '42',
       mailProvider: 'inbucket',
       emailSource: '33mail',
       mailDomainSettings: {
@@ -113,6 +141,12 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
     normalizePersistentSettings({}),
     {
       vpsUrl: '',
+      signupEntry: DEFAULT_SIGNUP_ENTRY,
+      browserBackend: DEFAULT_BROWSER_BACKEND,
+      fingerprintProvider: DEFAULT_FINGERPRINT_PROVIDER,
+      roxyApiBaseUrl: DEFAULT_ROXY_API_BASE_URL,
+      roxyApiToken: '',
+      roxyWorkspaceId: '',
       mailProvider: '163',
       emailSource: DEFAULT_EMAIL_SOURCE,
       mailDomainSettings: {
@@ -143,6 +177,12 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
     PERSISTED_TOP_SETTING_KEYS,
     [
       'vpsUrl',
+      'signupEntry',
+      'browserBackend',
+      'fingerprintProvider',
+      'roxyApiBaseUrl',
+      'roxyApiToken',
+      'roxyWorkspaceId',
       'mailProvider',
       'emailSource',
       'mailDomainSettings',
@@ -170,6 +210,12 @@ test('buildTopSettingPayload keeps the current email source and related settings
   assert.deepEqual(
     buildTopSettingPayload({
       vpsUrl: ' https://panel.example.com ',
+      signupEntry: 'chatgpt',
+      browserBackend: 'fingerprint',
+      fingerprintProvider: 'roxy',
+      roxyApiBaseUrl: ' http://127.0.0.1:50000/ ',
+      roxyApiToken: ' token-2 ',
+      roxyWorkspaceId: ' 84 ',
       mailProvider: 'qq',
       emailSource: 'tmailor',
       mailDomainSettings: {
@@ -195,6 +241,12 @@ test('buildTopSettingPayload keeps the current email source and related settings
     }),
     {
       vpsUrl: 'https://panel.example.com',
+      signupEntry: 'chatgpt',
+      browserBackend: 'fingerprint',
+      fingerprintProvider: 'roxy',
+      roxyApiBaseUrl: 'http://127.0.0.1:50000',
+      roxyApiToken: 'token-2',
+      roxyWorkspaceId: '84',
       mailProvider: 'qq',
       emailSource: 'tmailor',
       mailDomainSettings: {

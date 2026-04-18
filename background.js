@@ -1,10 +1,11 @@
 // background.js — Service Worker: orchestration, state, tab management, message routing
 
-importScripts('shared/email-addresses.js', 'shared/mail-provider-rotation.js', 'shared/mail-matching.js', 'shared/mail-freshness.js', 'shared/latest-mail.js', 'shared/tmailor-domains.js', 'shared/tmailor-api.js', 'shared/cloudmail-api.js', 'shared/codex2api-oauth.js', 'shared/tmailor-errors.js', 'shared/tmailor-mailbox-strategy.js', 'shared/tmailor-verification-profiles.js', 'shared/flow-recovery.js', 'shared/content-script-queue.js', 'shared/login-verification-codes.js', 'data/names.js', 'shared/flow-runner.js', 'shared/runtime-errors.js', 'shared/auto-run.js', 'shared/auto-run-failure-stats.js', 'shared/duck-mail-errors.js', 'shared/sidepanel-settings.js', 'shared/tab-reclaim.js');
+importScripts('shared/email-addresses.js', 'shared/mail-provider-rotation.js', 'shared/mail-matching.js', 'shared/mail-freshness.js', 'shared/latest-mail.js', 'shared/tmailor-domains.js', 'shared/tmailor-api.js', 'shared/cloudmail-api.js', 'shared/codex2api-oauth.js', 'shared/tmailor-errors.js', 'shared/tmailor-mailbox-strategy.js', 'shared/tmailor-verification-profiles.js', 'shared/flow-recovery.js', 'shared/content-script-queue.js', 'shared/login-verification-codes.js', 'shared/fingerprint-bridge-client.js', 'data/names.js', 'shared/flow-runner.js', 'shared/runtime-errors.js', 'shared/auto-run.js', 'shared/auto-run-failure-stats.js', 'shared/duck-mail-errors.js', 'shared/sidepanel-settings.js', 'shared/tab-reclaim.js');
 
 const LOG_PREFIX = '[Infinitoai:bg]';
 const DUCK_AUTOFILL_URL = 'https://duckduckgo.com/email/settings/autofill';
 const OFFICIAL_SIGNUP_ENTRY_URL = 'https://platform.openai.com/login';
+const CHATGPT_SIGNUP_ENTRY_URL = 'https://chatgpt.com/auth/login?callbackUrl=%2F&screen_hint=signup';
 const STOP_ERROR_MESSAGE = 'Flow stopped by user.';
 const AUTO_RUN_HANDOFF_MESSAGE = 'Auto run handed off to manual continuation.';
 const HUMAN_STEP_DELAY_MIN = 700;
@@ -65,6 +66,16 @@ const { DEFAULT_TMAILOR_DOMAIN_STATE, extractEmailDomain, isAllowedTmailorDomain
 const { createCloudMailEmail, normalizeCloudMailConfig, pollCloudMailVerificationCode } = CloudMailApi;
 const { exchangeCodex2ApiOAuthCallback, generateCodex2ApiOAuthUrl, normalizeCodex2ApiOAuthConfig } = Codex2ApiOAuth;
 const {
+  DEFAULT_FINGERPRINT_BRIDGE_BASE_URL,
+  buildFingerprintRunConfig,
+  createFingerprintRun,
+  deleteFingerprintRun,
+  executeFingerprintStep,
+  getFingerprintBridgeHealth,
+  getFingerprintRunEvents,
+  stopFingerprintRun,
+} = FingerprintBridgeClient;
+const {
   checkTmailorApiConnectivity,
   createTmailorApiCaptchaCooldownUntil,
   fetchAllowedTmailorEmail,
@@ -84,13 +95,20 @@ const {
   DEFAULT_AUTO_RUN_COUNT,
   DEFAULT_AUTO_RUN_INFINITE,
   DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
+  DEFAULT_BROWSER_BACKEND,
   PERSISTED_TOP_SETTING_KEYS,
   DEFAULT_EMAIL_SOURCE: DEFAULT_PERSISTED_EMAIL_SOURCE,
+  DEFAULT_FINGERPRINT_PROVIDER,
+  DEFAULT_ROXY_API_BASE_URL,
+  DEFAULT_SIGNUP_ENTRY,
   normalizePersistentSettings,
   sanitizeAutoRunCount,
   sanitizeAutoRotateMailProvider,
+  sanitizeBrowserBackend,
   sanitizeEmailSource: sanitizePersistedEmailSource,
+  sanitizeFingerprintProvider,
   sanitizeInfiniteAutoRun,
+  sanitizeSignupEntry,
 } = SidepanelSettings;
 
 const RECLAIM_SOURCE_CONFIG = {
@@ -157,6 +175,7 @@ const SENSITIVE_STATE_KEYS = [
   'cloudMailAdminPassword',
   'codex2ApiAdminKey',
   'codex2ApiOAuthSessionId',
+  'roxyApiToken',
 ];
 
 const SENSITIVE_DATA_UPDATE_KEYS = new Set([
@@ -173,6 +192,7 @@ const SENSITIVE_DATA_UPDATE_KEYS = new Set([
   'cloudMailAdminPassword',
   'codex2ApiAdminKey',
   'codex2ApiOAuthSessionId',
+  'roxyApiToken',
 ]);
 
 let automationWindowId = null;
@@ -302,6 +322,14 @@ const DEFAULT_STATE = {
   tabRegistry: {},
   ...buildInitialLogState(),
   vpsUrl: '',
+  signupEntry: DEFAULT_SIGNUP_ENTRY,
+  browserBackend: DEFAULT_BROWSER_BACKEND,
+  fingerprintProvider: DEFAULT_FINGERPRINT_PROVIDER,
+  roxyApiBaseUrl: DEFAULT_ROXY_API_BASE_URL,
+  roxyApiToken: '',
+  roxyWorkspaceId: '',
+  fingerprintRunId: '',
+  fingerprintBridgeEventCursor: 0,
   customPassword: '',
   mailProvider: '163', // 'qq' or '163'
   inbucketHost: '',
@@ -1889,6 +1917,12 @@ async function handleMessage(message, sender) {
       let nextTmailorDomainMode = undefined;
 
       if (message.payload.vpsUrl !== undefined) persistentUpdates.vpsUrl = message.payload.vpsUrl;
+      if (message.payload.signupEntry !== undefined) persistentUpdates.signupEntry = message.payload.signupEntry;
+      if (message.payload.browserBackend !== undefined) persistentUpdates.browserBackend = message.payload.browserBackend;
+      if (message.payload.fingerprintProvider !== undefined) persistentUpdates.fingerprintProvider = message.payload.fingerprintProvider;
+      if (message.payload.roxyApiBaseUrl !== undefined) persistentUpdates.roxyApiBaseUrl = message.payload.roxyApiBaseUrl;
+      if (message.payload.roxyApiToken !== undefined) persistentUpdates.roxyApiToken = message.payload.roxyApiToken;
+      if (message.payload.roxyWorkspaceId !== undefined) persistentUpdates.roxyWorkspaceId = message.payload.roxyWorkspaceId;
       if (message.payload.customPassword !== undefined) sessionUpdates.customPassword = message.payload.customPassword;
       if (message.payload.mailProvider !== undefined) persistentUpdates.mailProvider = message.payload.mailProvider;
       if (message.payload.emailSource !== undefined) persistentUpdates.emailSource = sanitizePersistedEmailSource(message.payload.emailSource);
@@ -2301,6 +2335,8 @@ async function abortCurrentAutoRunRound(options = {}) {
     await addLog(logMessage, 'warn');
   }
   await broadcastStopToContentScripts();
+  const state = await getState();
+  await stopFingerprintBridgeRunIfNeeded(state);
 
   for (const waiter of stepWaiters.values()) {
     waiter.reject(new Error(STOP_ERROR_MESSAGE));
@@ -2327,6 +2363,146 @@ async function requestStop() {
     logMessage: 'Stop requested. Cancelling current operations...',
     sendStoppedStatus: true,
   });
+}
+
+function normalizeFingerprintBridgeEventLevel(level) {
+  const normalizedLevel = String(level || '').trim().toLowerCase();
+  if (normalizedLevel === 'error') return 'error';
+  if (normalizedLevel === 'warn' || normalizedLevel === 'warning') return 'warn';
+  if (normalizedLevel === 'ok' || normalizedLevel === 'success') return 'ok';
+  return 'info';
+}
+
+async function appendFingerprintBridgeEvents(events = []) {
+  for (const event of events || []) {
+    const message = String(event?.message || '').trim();
+    if (!message) {
+      continue;
+    }
+    await addLog(message, normalizeFingerprintBridgeEventLevel(event?.level));
+  }
+}
+
+function getFingerprintBridgeBaseUrl() {
+  return DEFAULT_FINGERPRINT_BRIDGE_BASE_URL;
+}
+
+async function ensureFingerprintBridgeRun(state, options = {}) {
+  if (!isFingerprintBrowserBackend(state)) {
+    return state;
+  }
+
+  if (state.fingerprintRunId) {
+    return state;
+  }
+
+  await getFingerprintBridgeHealth({
+    baseUrl: getFingerprintBridgeBaseUrl(),
+  });
+
+  const response = await createFingerprintRun(
+    getFingerprintRunConfigFromState(state, options),
+    {
+      baseUrl: getFingerprintBridgeBaseUrl(),
+      timeoutMs: 45000,
+    }
+  );
+
+  await appendFingerprintBridgeEvents(response.events);
+  await setState({
+    fingerprintRunId: String(response.runId || '').trim(),
+    fingerprintBridgeEventCursor: Number.parseInt(String(response.nextSeq || 0), 10) || 0,
+  });
+
+  return await getState();
+}
+
+async function stopFingerprintBridgeRunIfNeeded(state = null) {
+  const effectiveState = state || await getState();
+  if (!effectiveState?.fingerprintRunId) {
+    return;
+  }
+
+  try {
+    const response = await stopFingerprintRun(effectiveState.fingerprintRunId, {
+      baseUrl: getFingerprintBridgeBaseUrl(),
+      timeoutMs: 10000,
+    });
+    await appendFingerprintBridgeEvents(response.events);
+  } catch {}
+}
+
+async function deleteFingerprintBridgeRunIfNeeded(state = null) {
+  const effectiveState = state || await getState();
+  if (!effectiveState?.fingerprintRunId) {
+    return;
+  }
+
+  try {
+    const response = await deleteFingerprintRun(effectiveState.fingerprintRunId, {
+      baseUrl: getFingerprintBridgeBaseUrl(),
+      timeoutMs: 10000,
+    });
+    await appendFingerprintBridgeEvents(response.events);
+  } catch {}
+
+  await setState({
+    fingerprintRunId: '',
+    fingerprintBridgeEventCursor: 0,
+  });
+}
+
+async function executeFingerprintBridgeStepWithState(step, state, payload = {}, options = {}) {
+  const effectiveState = await ensureFingerprintBridgeRun(state, {
+    currentStep: step,
+    ...options,
+  });
+  const runId = String(effectiveState.fingerprintRunId || '').trim();
+  if (!runId) {
+    throw new Error('Fingerprint bridge did not return a run id.');
+  }
+
+  const response = await executeFingerprintStep(
+    runId,
+    step,
+    {
+      ...getFingerprintRunConfigFromState(effectiveState, {
+        currentStep: step,
+        ...options,
+      }),
+      ...payload,
+    },
+    {
+      baseUrl: getFingerprintBridgeBaseUrl(),
+      timeoutMs: 240000,
+    }
+  );
+
+  await appendFingerprintBridgeEvents(response.events);
+  await setState({
+    fingerprintRunId: String(response.runId || runId).trim(),
+    fingerprintBridgeEventCursor: Number.parseInt(String(response.nextSeq || 0), 10) || 0,
+  });
+
+  if (response.status === 'stopped') {
+    throw new Error(STOP_ERROR_MESSAGE);
+  }
+
+  if (response.status === 'failed') {
+    throw new Error(response.error || `Fingerprint bridge step ${step} failed.`);
+  }
+
+  return response;
+}
+
+async function completeFingerprintBridgeStep(step, state, payload = {}, options = {}) {
+  const response = await executeFingerprintBridgeStepWithState(step, state, payload, options);
+  if (response?.payload?.localhostUrl) {
+    await setState({ localhostUrl: response.payload.localhostUrl });
+  }
+  await setStepStatus(step, 'completed');
+  notifyStepComplete(step, response?.payload || {});
+  return response;
 }
 
 // ============================================================
@@ -2479,11 +2655,12 @@ async function recoverStep1VpsPanel(error) {
 
 async function recoverStep2PlatformLogin(error) {
   const message = error?.message || String(error || 'unknown step 2 error');
+  const state = await getState();
   await addLog(
-    `第 2 步：${message} 正在重开 Platform 登录页并重试一次。`,
+    `第 2 步：${message} 正在重开${getSignupEntryLabel(state)}并重试一次。`,
     'warn'
   );
-  await reuseOrCreateTab('signup-page', OFFICIAL_SIGNUP_ENTRY_URL, {
+  await reuseOrCreateTab('signup-page', getSignupEntryUrl(state), {
     reuseActiveTabOnCreate: true,
     reloadIfSameUrl: true,
   });
@@ -2507,7 +2684,7 @@ async function replayStep2AndStep3WithCurrentTmailorLease(error) {
   };
   await setTmailorEmailLease({ recoveryAttempts: nextRecoveryAttempts });
   await addLog(
-    `第 4 步：${error?.message || String(error || 'unknown error')} 正在重开 Platform 登录页，并用当前租约邮箱 ${lease.email} 重放第 2-3 步一次。`,
+    `第 4 步：${error?.message || String(error || 'unknown error')} 正在重开${getSignupEntryLabel(state)}，并用当前租约邮箱 ${lease.email} 重放第 2-3 步一次。`,
     'warn'
   );
 
@@ -2516,7 +2693,7 @@ async function replayStep2AndStep3WithCurrentTmailorLease(error) {
     await setPasswordState(lease.password);
   }
 
-  await reuseOrCreateTab('signup-page', OFFICIAL_SIGNUP_ENTRY_URL, {
+  await reuseOrCreateTab('signup-page', getSignupEntryUrl(state), {
     reuseActiveTabOnCreate: true,
     reloadIfSameUrl: true,
   });
@@ -2566,6 +2743,37 @@ function getCurrentAutoRotateMailProvider(state) {
 
 function getCurrentOAuthBackend(state) {
   return state?.oauthBackend === 'codex2api' ? 'codex2api' : 'vps';
+}
+
+function getCurrentSignupEntry(state) {
+  return sanitizeSignupEntry(state?.signupEntry);
+}
+
+function getCurrentBrowserBackend(state) {
+  return sanitizeBrowserBackend(state?.browserBackend);
+}
+
+function isFingerprintBrowserBackend(state) {
+  return getCurrentBrowserBackend(state) === 'fingerprint';
+}
+
+function getSignupEntryUrl(state) {
+  return getCurrentSignupEntry(state) === 'chatgpt'
+    ? CHATGPT_SIGNUP_ENTRY_URL
+    : OFFICIAL_SIGNUP_ENTRY_URL;
+}
+
+function getSignupEntryLabel(state) {
+  return getCurrentSignupEntry(state) === 'chatgpt'
+    ? 'ChatGPT 注册入口'
+    : 'Platform 登录页';
+}
+
+function getFingerprintRunConfigFromState(state = {}, options = {}) {
+  return buildFingerprintRunConfig(state, {
+    ...options,
+    entryUrl: options.entryUrl || getSignupEntryUrl(state),
+  });
 }
 
 function getCodex2ApiOAuthConfigFromState(state = {}) {
@@ -3347,6 +3555,12 @@ async function autoRunLoop(totalRuns, infiniteMode = false, options = {}) {
 
       const keepSettings = {
         vpsUrl: prevState.vpsUrl,
+        signupEntry: prevState.signupEntry,
+        browserBackend: prevState.browserBackend,
+        fingerprintProvider: prevState.fingerprintProvider,
+        roxyApiBaseUrl: prevState.roxyApiBaseUrl,
+        roxyApiToken: prevState.roxyApiToken,
+        roxyWorkspaceId: prevState.roxyWorkspaceId,
         mailProvider: activeMailProvider,
         inbucketHost: prevState.inbucketHost,
         inbucketMailbox: prevState.inbucketMailbox,
@@ -3381,7 +3595,7 @@ async function autoRunLoop(totalRuns, infiniteMode = false, options = {}) {
       throwIfStopped();
       const currentState = await getState();
       const currentEmailSource = getCurrentEmailSource(currentState);
-      await addLog(`=== 自动运行 ${runTargetText} — 阶段 1：刷新 ${getEmailSourceLabel(currentEmailSource)}，然后打开 Platform 登录页 ===`, 'info');
+      await addLog(`=== 自动运行 ${runTargetText} — 阶段 1：刷新 ${getEmailSourceLabel(currentEmailSource)}，然后打开${getSignupEntryLabel(currentState)} ===`, 'info');
       sendAutoRunStatus('running', { currentRun: run });
 
       let emailReady = false;
@@ -3444,7 +3658,7 @@ async function autoRunLoop(totalRuns, infiniteMode = false, options = {}) {
         }
       }
 
-      await addLog(`=== 第 ${runTargetText} 轮 — 阶段 2：打开 Platform 登录页 ===`, 'info');
+      await addLog(`=== 第 ${runTargetText} 轮 — 阶段 2：打开${getSignupEntryLabel(await getState())} ===`, 'info');
       sendAutoRunStatus('running', { currentRun: run });
       await executeStepAndWait(2, 2000);
 
@@ -3685,7 +3899,22 @@ function isStep2RecoveredAuthPageReady(pageState = {}) {
     return true;
   }
 
+  if (/chatgpt\.com\/auth\/login/i.test(url) && hasVisibleCredentialInput) {
+    return true;
+  }
+
+  if (/(?:auth|accounts)\.openai\.com\/log-in-or-create-account/i.test(url) && hasVisibleCredentialInput) {
+    return true;
+  }
+
   return false;
+}
+
+function isStep2ChatgptEntryPageState(pageState = {}) {
+  const url = String(pageState?.url || '').trim();
+  return /chatgpt\.com\/auth\/login/i.test(url)
+    && !pageState?.hasVisibleVerificationInput
+    && !pageState?.hasVisibleProfileFormInput;
 }
 
 function isStep2UnexpectedAuthLoginPageState(pageState = {}) {
@@ -3697,6 +3926,14 @@ function isStep2UnexpectedAuthLoginPageState(pageState = {}) {
 }
 
 async function executeStep2(state, options = {}) {
+  if (isFingerprintBrowserBackend(state)) {
+    await addLog(`第 2 步：正在通过指纹浏览器打开${getSignupEntryLabel(state)}...`, 'info');
+    await completeFingerprintBridgeStep(2, state, {
+      entryUrl: getSignupEntryUrl(state),
+    });
+    return;
+  }
+
   const replayedAfterNavigationInterrupt = Boolean(options?.replayedAfterNavigationInterrupt);
   const preferSignupEntry = Boolean(options?.preferSignupEntry);
   if (!replayedAfterNavigationInterrupt) {
@@ -3705,13 +3942,13 @@ async function executeStep2(state, options = {}) {
 
   if (replayedAfterNavigationInterrupt) {
     await addLog(
-      '第 2 步：导航打断后页面还卡在 signing bridge，正在重放 Platform 登录页步骤。',
+      `第 2 步：导航打断后页面还卡在 signing bridge，正在重放${getSignupEntryLabel(state)}步骤。`,
       'warn'
     );
   }
 
-  await addLog('第 2 步：正在打开 Platform 登录页...');
-  await reuseOrCreateTab('signup-page', OFFICIAL_SIGNUP_ENTRY_URL, {
+  await addLog(`第 2 步：正在打开${getSignupEntryLabel(state)}...`);
+  await reuseOrCreateTab('signup-page', getSignupEntryUrl(state), {
     reuseActiveTabOnCreate: true,
     reloadIfSameUrl: replayedAfterNavigationInterrupt,
   });
@@ -3723,6 +3960,7 @@ async function executeStep2(state, options = {}) {
       source: 'background',
       payload: {
         preferSignupEntry,
+        signupEntry: getCurrentSignupEntry(state),
       },
     });
   } catch (err) {
@@ -3732,14 +3970,14 @@ async function executeStep2(state, options = {}) {
         '第 2 步：signup 页面在返回结果前已发生跳转，继续等待完成信号。',
         'warn'
       );
-      await waitForStep2CompletionSignalOrAuthPageReady();
+      await waitForStep2CompletionSignalOrAuthPageReady(state);
       return;
     }
     throw err;
   }
 }
 
-async function waitForStep2CompletionSignalOrAuthPageReady() {
+async function waitForStep2CompletionSignalOrAuthPageReady(initialState = {}) {
   const timeoutMs = 15000;
   const start = Date.now();
   let lastHeartbeatAt = 0;
@@ -3747,6 +3985,7 @@ async function waitForStep2CompletionSignalOrAuthPageReady() {
   while (Date.now() - start < timeoutMs) {
     const currentState = await getState();
     const currentStepStatus = currentState?.stepStatuses?.[2];
+    const currentSignupEntry = getCurrentSignupEntry(currentState?.signupEntry ? currentState : initialState);
 
     if (currentStepStatus === 'completed' || currentStepStatus === 'failed' || currentStepStatus === 'stopped') {
       step2NavigationReplayAttempted = false;
@@ -3784,6 +4023,18 @@ async function waitForStep2CompletionSignalOrAuthPageReady() {
     }
 
     const elapsedMs = Date.now() - start;
+    if (currentSignupEntry === 'chatgpt' && isStep2ChatgptEntryPageState(pageState)) {
+      if (!step2NavigationReplayAttempted && elapsedMs >= 3000) {
+        step2NavigationReplayAttempted = true;
+        await addLog(
+          '第 2 步：ChatGPT 注册入口仍未推进到邮箱页，重注入后重放第 2 步一次。',
+          'warn'
+        );
+        await executeStep2(currentState, { replayedAfterNavigationInterrupt: true });
+        return;
+      }
+    }
+
     if (isStep2PlatformSigningBridgePageState(pageState)) {
       if (elapsedMs - lastHeartbeatAt >= 5000) {
         lastHeartbeatAt = elapsedMs;
@@ -3815,6 +4066,12 @@ async function waitForStep2CompletionSignalOrAuthPageReady() {
 // ============================================================
 
 async function executeStep3(state) {
+  if (isFingerprintBrowserBackend(state)) {
+    await addLog('第 3 步：正在通过指纹浏览器填写邮箱和密码...', 'info');
+    await completeFingerprintBridgeStep(3, state);
+    return;
+  }
+
   const emailSource = getCurrentEmailSource(state);
   const activeTmailorLease = getActiveTmailorEmailLease(state);
   let email = emailSource === 'tmailor' && activeTmailorLease?.email
@@ -4492,6 +4749,16 @@ async function recoverSignupPageFillCodeError(step, error) {
 
 async function submitVerificationCodeWithRecovery(step, code, options = {}) {
   const { recovered = false } = options;
+  const state = await getState();
+
+  if (isFingerprintBrowserBackend(state)) {
+    const response = await executeFingerprintBridgeStepWithState(step, state, { code });
+    if (response?.payload?.localhostUrl) {
+      await setState({ localhostUrl: response.payload.localhostUrl });
+    }
+    return response?.payload || { accepted: true };
+  }
+
   const signupTabId = await getTabId('signup-page');
   if (!signupTabId) {
     throw new Error('Signup/auth page tab was closed. Cannot fill verification code.');
@@ -5255,6 +5522,12 @@ async function ensureSignupPageReadyForProfile(state, step = 5) {
 // ============================================================
 
 async function executeStep5(state) {
+  if (isFingerprintBrowserBackend(state)) {
+    await addLog('第 5 步：正在通过指纹浏览器填写资料页...', 'info');
+    await completeFingerprintBridgeStep(5, state);
+    return;
+  }
+
   if (state.existingAccountLogin) {
     await addLog(
       'Step 5: Skipping profile completion because step 3 already identified an existing-account login flow.',
@@ -5402,7 +5675,7 @@ async function refreshOauthUrlBeforeStep6(state, reason = 'Refreshing the VPS OA
 async function recoverStep3OauthTimeout() {
   const state = await getState();
   await addLog(
-    'Step 3: The signup page timed out before credentials could be submitted. Reopening the platform login page and retrying once with the current email/password...',
+    `Step 3: The signup page timed out before credentials could be submitted. Reopening ${getSignupEntryLabel(state)} and retrying once with the current email/password...`,
     'warn'
   );
 
@@ -5420,7 +5693,7 @@ async function recoverStep3PlatformLogin(error, options = {}) {
     ? ` (retry ${attempt}/${maxAttempts})`
     : '';
   await addLog(
-    `Step 3: ${message} Reopening the platform login page${retryLabel} and retrying with the current email/password...`,
+    `Step 3: ${message} Reopening ${getSignupEntryLabel(state)}${retryLabel} and retrying with the current email/password...`,
     'warn'
   );
 
@@ -5452,6 +5725,12 @@ async function recoverStep6PlatformLogin(error) {
 }
 
 async function executeStep6(state) {
+  if (isFingerprintBrowserBackend(state)) {
+    await addLog('第 6 步：正在通过指纹浏览器打开 OAuth 登录链路...', 'info');
+    await completeFingerprintBridgeStep(6, state);
+    return;
+  }
+
   if (!state.email) {
     throw new Error('No email. Complete step 3 first.');
   }
@@ -5736,6 +6015,12 @@ async function replaySteps6ThroughTargetStepWithCurrentAccount(targetStep, logMe
 let webNavListener = null;
 
 async function executeStep8(state) {
+  if (isFingerprintBrowserBackend(state)) {
+    await addLog('第 8 步：正在通过指纹浏览器完成授权确认并抓取回调...', 'info');
+    await completeFingerprintBridgeStep(8, state);
+    return;
+  }
+
   if (!state.oauthUrl) {
     throw new Error('No OAuth URL. Complete step 6 first.');
   }
@@ -5951,6 +6236,7 @@ async function executeStep9(state) {
     await addLog(`第 9 步：Codex2API OAuth 账号已添加${result?.email ? `：${result.email}` : '。'}`, 'ok');
     await setStepStatus(9, 'completed');
     notifyStepComplete(9, result || {});
+    await deleteFingerprintBridgeRunIfNeeded(effectiveState);
     return;
   }
 
@@ -6026,6 +6312,8 @@ async function executeStep9(state) {
   if (response?.error) {
     throw new Error(response.error);
   }
+
+  await deleteFingerprintBridgeRunIfNeeded(effectiveState);
 }
 
 // ============================================================

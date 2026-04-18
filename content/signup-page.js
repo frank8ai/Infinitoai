@@ -124,10 +124,13 @@ const CREDENTIAL_INPUT_SELECTORS = [
 
 const CREDENTIAL_INPUT_SELECTOR = CREDENTIAL_INPUT_SELECTORS.join(', ');
 const PLATFORM_LOGIN_ENTRY_URL = 'https://platform.openai.com/login';
+const CHATGPT_LOGIN_ENTRY_URL = 'https://chatgpt.com/auth/login?callbackUrl=%2F&screen_hint=signup';
+const CHATGPT_AUTH_BRIDGE_URL = 'https://auth.openai.com/log-in-or-create-account';
 const PLATFORM_SIGNING_BRIDGE_ISSUE_TIMEOUT_MS = 45000;
 
 async function step2_clickRegister(payload = {}) {
   const preferSignupEntry = Boolean(payload?.preferSignupEntry);
+  const signupEntry = payload?.signupEntry === 'chatgpt' ? 'chatgpt' : 'platform';
   log('Step 2: Looking for Register/Sign up button...');
   throwIfUnsupportedCountryRegionTerritoryBlocked(2);
 
@@ -135,7 +138,11 @@ async function step2_clickRegister(payload = {}) {
   await logoutFromPlatformChatSessionIfNeeded();
   throwIfStep2UnexpectedAuthLoginEntry();
 
-  if (isDirectSignupFormVisible({ preferSignupEntry })) {
+  if (signupEntry === 'chatgpt') {
+    await dismissChatgptCookieBannerIfNeeded();
+  }
+
+  if (isDirectSignupFormVisible({ preferSignupEntry, signupEntry })) {
     log('Step 2: Official signup form is already visible. Continuing without clicking Register.', 'info');
     reportComplete(2);
     return;
@@ -157,7 +164,7 @@ async function step2_clickRegister(payload = {}) {
     }
   }
 
-  const registerBtn = await findStep2RegisterButtonWithRecovery({ preferSignupEntry });
+  const registerBtn = await findStep2RegisterButtonWithRecovery({ preferSignupEntry, signupEntry });
   if (!registerBtn) {
     log('Step 2: Official signup form is already visible after auth-issue recovery. Continuing without clicking Register.', 'info');
     reportComplete(2);
@@ -165,14 +172,34 @@ async function step2_clickRegister(payload = {}) {
   }
 
   await humanPause(450, 1200);
-  await reportStepCompleteBeforePotentialNavigation(2);
+  if (signupEntry !== 'chatgpt') {
+    await reportStepCompleteBeforePotentialNavigation(2);
+  }
   simulateClick(registerBtn);
   log('Step 2: Clicked Register button');
+
+  if (signupEntry === 'chatgpt') {
+    await waitForChatgptSignupAdvance();
+    reportComplete(2);
+  }
 }
 
 async function findStep2RegisterButtonWithRecovery(options = {}) {
   const preferSignupEntry = Boolean(options?.preferSignupEntry);
+  const signupEntry = options?.signupEntry === 'chatgpt' ? 'chatgpt' : 'platform';
   for (let attempt = 0; attempt < 2; attempt++) {
+    if (signupEntry === 'chatgpt' && isChatgptLoginEntryPage()) {
+      const chatgptSignupButton = findVisibleChatgptSignupButton()
+        || await waitForElementByText(
+          'a, button, [role="button"], [role="link"], span',
+          /sign\s*up|free\s*sign\s*up|免费注册|注册/i,
+          5000
+        ).catch(() => null);
+      if (chatgptSignupButton) {
+        return chatgptSignupButton;
+      }
+    }
+
     try {
       return await waitForElementByText(
         'a, button, [role="button"], [role="link"]',
@@ -186,7 +213,7 @@ async function findStep2RegisterButtonWithRecovery(options = {}) {
       return await waitForElement('a[href*="signup"], a[href*="register"]', 5000);
     } catch {}
 
-    if (isDirectSignupFormVisible({ preferSignupEntry })) {
+    if (isDirectSignupFormVisible({ preferSignupEntry, signupEntry })) {
       return null;
     }
 
@@ -196,7 +223,7 @@ async function findStep2RegisterButtonWithRecovery(options = {}) {
     }
 
     await waitForPlatformEntryStateToSettle(5000);
-    if (isDirectSignupFormVisible({ preferSignupEntry })) {
+    if (isDirectSignupFormVisible({ preferSignupEntry, signupEntry })) {
       return null;
     }
   }
@@ -220,6 +247,87 @@ async function reportStepCompleteBeforePotentialNavigation(step, data) {
 
 function isPlatformLoginEntryPage() {
   return /platform\.openai\.com\/login/i.test(location.href);
+}
+
+function isChatgptLoginEntryPage(url = location.href) {
+  return /chatgpt\.com\/auth\/login/i.test(String(url || ''));
+}
+
+function findVisibleChatgptSignupButton() {
+  const dataTestIdButton = document.querySelector('[data-testid="signup-button"]');
+  if (dataTestIdButton && isElementVisible(dataTestIdButton)) {
+    return dataTestIdButton;
+  }
+
+  const candidates = Array.from(document.querySelectorAll('a, button, [role="button"], [role="link"], span'));
+  const textCandidate = candidates.find((node) => {
+    if (!isElementVisible(node)) {
+      return false;
+    }
+    const text = String(node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+    return /sign\s*up|free\s*sign\s*up|免费注册|注册/i.test(text);
+  });
+
+  if (textCandidate) {
+    return textCandidate.closest?.('a, button, [role="button"], [role="link"]') || textCandidate;
+  }
+
+  return null;
+}
+
+async function waitForChatgptSignupAdvance(timeout = 15000) {
+  const start = Date.now();
+  let retriedClick = false;
+  let forcedAuthBridge = false;
+
+  while (Date.now() - start < timeout) {
+    throwIfStopped();
+
+    if (isDirectSignupFormVisible({ signupEntry: 'chatgpt' })) {
+      return true;
+    }
+
+    if (isSignupContextUrl(location.href) || isAuthLoginEntryPage(location.href)) {
+      return true;
+    }
+
+    if (!retriedClick && Date.now() - start >= 3000 && isChatgptLoginEntryPage()) {
+      const signupButton = findVisibleChatgptSignupButton();
+      if (signupButton) {
+        retriedClick = true;
+        simulateClick(signupButton);
+        log('第 2 步：ChatGPT 注册入口仍未跳转，已再次点击 Sign up。', 'warn');
+      }
+    }
+
+    if (!forcedAuthBridge && Date.now() - start >= 6000 && isChatgptLoginEntryPage()) {
+      forcedAuthBridge = true;
+      location.href = CHATGPT_AUTH_BRIDGE_URL;
+      log(`第 2 步：ChatGPT 注册入口仍未推进，已改为直接打开 ${CHATGPT_AUTH_BRIDGE_URL}。`, 'warn');
+    }
+
+    await sleep(250);
+  }
+
+  throw new Error(`Step 2 blocked: ChatGPT signup entry did not advance to the registration flow. URL: ${location.href}`);
+}
+
+async function dismissChatgptCookieBannerIfNeeded() {
+  const acceptButton = await waitForElementByText(
+    'a, button, [role="button"], [role="link"], span',
+    /accept all|全部接受|manage cookies|管理 cookie|拒绝非必需/i,
+    1500
+  ).catch(() => null);
+
+  if (!acceptButton) {
+    return false;
+  }
+
+  await humanPause(350, 900);
+  simulateClick(acceptButton);
+  log('第 2 步：已处理 ChatGPT Cookie 提示。', 'info');
+  await sleep(800);
+  return true;
 }
 
 function isPlatformHomeRedirectPage() {
@@ -667,7 +775,16 @@ function throwIfUnsupportedCountryRegionTerritoryBlocked(step, text = getVisible
 
 function isDirectSignupFormVisible(options = {}) {
   const preferSignupEntry = Boolean(options?.preferSignupEntry);
+  const signupEntry = options?.signupEntry === 'chatgpt' ? 'chatgpt' : 'platform';
   const currentUrl = String(location.href || '');
+
+  if (signupEntry === 'chatgpt' && isChatgptLoginEntryPage(currentUrl)) {
+    return hasVisibleCredentialInput();
+  }
+
+  if (isChatgptLoginEntryPage(currentUrl)) {
+    return hasVisibleCredentialInput();
+  }
 
   if (preferSignupEntry) {
     // platform.openai.com/login is a special email-first signup entry:
@@ -707,13 +824,17 @@ function throwIfStep2UnexpectedAuthLoginEntry() {
 }
 
 function isSignupContextUrl(url = location.href) {
-  return /(?:auth|accounts)\.openai\.com\/(?:u\/signup\/|create-account)/i.test(String(url || ''));
+  return /(?:auth|accounts)\.openai\.com\/(?:u\/signup\/|create-account|log-in-or-create-account)/i.test(String(url || ''));
 }
 
 function isDirectPlatformLoginStep3Entry(url = location.href) {
   // OpenAI's platform login entry is special: step 3 fills the email here first,
   // then Continue routes the flow into the signup password screen automatically.
   return isPlatformLoginEntryPage() && hasVisibleCredentialInput() && /platform\.openai\.com\/login/i.test(String(url || ''));
+}
+
+function isDirectChatgptLoginStep3Entry(url = location.href) {
+  return isChatgptLoginEntryPage(url) && hasVisibleCredentialInput();
 }
 
 async function waitForStep3SignupContext(timeout = 8000) {
@@ -727,6 +848,9 @@ async function waitForStep3SignupContext(timeout = 8000) {
       return true;
     }
     if (isDirectPlatformLoginStep3Entry(location.href)) {
+      return true;
+    }
+    if (isDirectChatgptLoginStep3Entry(location.href)) {
       return true;
     }
     if (isStep3AlreadyAdvancedPage(visibleText, location.href)) {

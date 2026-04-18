@@ -77,6 +77,64 @@
         </div>
       </div>
       <div class="data-row">
+        <span class="data-label">Entry</span>
+        <div class="data-select-shell">
+          <select id="select-signup-entry" class="data-select">
+            <option value="platform">Platform</option>
+            <option value="chatgpt">ChatGPT</option>
+          </select>
+          <span class="data-select-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none">
+              <path d="M3.5 5.75L8 10.25L12.5 5.75" />
+            </svg>
+          </span>
+        </div>
+      </div>
+      <div class="data-row">
+        <span class="data-label">Browser</span>
+        <div class="data-select-shell">
+          <select id="select-browser-backend" class="data-select">
+            <option value="extension">Extension</option>
+            <option value="fingerprint">Fingerprint</option>
+          </select>
+          <span class="data-select-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none">
+              <path d="M3.5 5.75L8 10.25L12.5 5.75" />
+            </svg>
+          </span>
+        </div>
+      </div>
+      <div class="data-row" id="row-fingerprint-provider" style="display:none;">
+        <span class="data-label">Provider</span>
+        <div class="data-select-shell">
+          <select id="select-fingerprint-provider" class="data-select">
+            <option value="roxy">RoxyBrowser</option>
+          </select>
+          <span class="data-select-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none">
+              <path d="M3.5 5.75L8 10.25L12.5 5.75" />
+            </svg>
+          </span>
+        </div>
+      </div>
+      <div class="data-row data-row-stack" id="row-roxy-settings" style="display:none;">
+        <span class="data-label">Roxy</span>
+        <div class="mail-domain-groups">
+          <label class="mail-domain-group active">
+            <span class="mail-domain-title">API</span>
+            <input type="text" id="input-roxy-api-base-url" class="data-input" placeholder="http://127.0.0.1:50000" />
+          </label>
+          <label class="mail-domain-group active">
+            <span class="mail-domain-title">Token</span>
+            <input type="password" id="input-roxy-api-token" class="data-input" placeholder="Roxy API token" />
+          </label>
+          <label class="mail-domain-group active">
+            <span class="mail-domain-title">Workspace</span>
+            <input type="text" id="input-roxy-workspace-id" class="data-input" placeholder="workspace id" />
+          </label>
+        </div>
+      </div>
+      <div class="data-row">
         <span class="data-label">OAuth</span>
         <div class="data-select-shell">
           <select id="select-oauth-backend" class="data-select">

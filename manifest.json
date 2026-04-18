@@ -20,6 +20,7 @@
     "https://tmailor.com/*",
     "https://challenges.cloudflare.com/*",
     "https://platform.openai.com/*",
+    "https://chatgpt.com/*",
     "https://auth0.openai.com/*",
     "https://auth.openai.com/*",
     "https://accounts.openai.com/*",
@@ -53,6 +54,7 @@
     },
     {
       "matches": [
+        "https://chatgpt.com/*",
         "https://platform.openai.com/*",
         "https://auth0.openai.com/*",
         "https://auth.openai.com/*",

@@ -125,6 +125,10 @@ test('detectReclaimableSource recognizes platform login and chat pages as signup
     detectReclaimableSource('https://platform.openai.com/chat', {}),
     'signup-page'
   );
+  assert.equal(
+    detectReclaimableSource('https://chatgpt.com/auth/login?callbackUrl=%2F&screen_hint=signup', {}),
+    'signup-page'
+  );
 });
 
 test('signup-page avoids reusing the current active tab during create-path navigation', () => {

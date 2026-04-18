@@ -12,8 +12,18 @@
   const DEFAULT_AUTO_ROTATE_MAIL_PROVIDER = false;
   const DEFAULT_MAIL_PROVIDER = '163';
   const DEFAULT_EMAIL_SOURCE = 'tmailor';
+  const DEFAULT_SIGNUP_ENTRY = 'platform';
+  const DEFAULT_BROWSER_BACKEND = 'extension';
+  const DEFAULT_FINGERPRINT_PROVIDER = 'roxy';
+  const DEFAULT_ROXY_API_BASE_URL = 'http://127.0.0.1:50000';
   const PERSISTED_TOP_SETTING_KEYS = [
     'vpsUrl',
+    'signupEntry',
+    'browserBackend',
+    'fingerprintProvider',
+    'roxyApiBaseUrl',
+    'roxyApiToken',
+    'roxyWorkspaceId',
     'mailProvider',
     'emailSource',
     'mailDomainSettings',
@@ -80,6 +90,18 @@
     return value === 'codex2api' ? 'codex2api' : 'vps';
   }
 
+  function sanitizeSignupEntry(value) {
+    return value === 'chatgpt' ? 'chatgpt' : DEFAULT_SIGNUP_ENTRY;
+  }
+
+  function sanitizeBrowserBackend(value) {
+    return value === 'fingerprint' ? 'fingerprint' : DEFAULT_BROWSER_BACKEND;
+  }
+
+  function sanitizeFingerprintProvider(value) {
+    return value === 'roxy' ? 'roxy' : DEFAULT_FINGERPRINT_PROVIDER;
+  }
+
   function normalizeEmailDomain(domain) {
     return String(domain || '').trim().replace(/^@+/, '').toLowerCase();
   }
@@ -95,6 +117,14 @@
   function normalizePersistentSettings(value = {}) {
     return {
       vpsUrl: typeof value.vpsUrl === 'string' ? value.vpsUrl : '',
+      signupEntry: sanitizeSignupEntry(value.signupEntry),
+      browserBackend: sanitizeBrowserBackend(value.browserBackend),
+      fingerprintProvider: sanitizeFingerprintProvider(value.fingerprintProvider),
+      roxyApiBaseUrl: typeof value.roxyApiBaseUrl === 'string' ? value.roxyApiBaseUrl : DEFAULT_ROXY_API_BASE_URL,
+      roxyApiToken: typeof value.roxyApiToken === 'string' ? value.roxyApiToken : '',
+      roxyWorkspaceId: typeof value.roxyWorkspaceId === 'string' || typeof value.roxyWorkspaceId === 'number'
+        ? String(value.roxyWorkspaceId)
+        : '',
       mailProvider: sanitizeMailProvider(value.mailProvider),
       emailSource: sanitizeEmailSource(value.emailSource),
       mailDomainSettings: normalizeMailDomainSettings(value.mailDomainSettings),
@@ -122,6 +152,9 @@
     return {
       ...normalized,
       vpsUrl: normalized.vpsUrl.trim(),
+      roxyApiBaseUrl: normalized.roxyApiBaseUrl.trim().replace(/\/+$/, '') || DEFAULT_ROXY_API_BASE_URL,
+      roxyApiToken: normalized.roxyApiToken.trim(),
+      roxyWorkspaceId: normalized.roxyWorkspaceId.trim(),
       inbucketHost: normalized.inbucketHost.trim(),
       inbucketMailbox: normalized.inbucketMailbox.trim(),
       cloudMailBaseUrl: normalized.cloudMailBaseUrl.trim().replace(/\/+$/, ''),
@@ -187,15 +220,22 @@
     DEFAULT_AUTO_RUN_COUNT,
     DEFAULT_AUTO_RUN_INFINITE,
     DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
+    DEFAULT_BROWSER_BACKEND,
     DEFAULT_EMAIL_SOURCE,
+    DEFAULT_FINGERPRINT_PROVIDER,
+    DEFAULT_ROXY_API_BASE_URL,
+    DEFAULT_SIGNUP_ENTRY,
     PERSISTED_TOP_SETTING_KEYS,
     getAutoContinueHint,
     getEmailInputPlaceholder,
     normalizePersistentSettings,
     sanitizeAutoRunCount,
     sanitizeAutoRotateMailProvider,
+    sanitizeBrowserBackend,
     sanitizeEmailSource,
+    sanitizeFingerprintProvider,
     sanitizeInfiniteAutoRun,
     sanitizeOAuthBackend,
+    sanitizeSignupEntry,
   };
 });

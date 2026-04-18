@@ -16,15 +16,19 @@ test('background copy reflects the email-first auto-run flow while keeping the p
   );
   assert.match(
     backgroundSource,
-    /阶段 1：刷新 .*，然后打开 Platform 登录页/i
+    /const CHATGPT_SIGNUP_ENTRY_URL = 'https:\/\/chatgpt\.com\/auth\/login\?callbackUrl=%2F&screen_hint=signup';/i
   );
   assert.match(
     backgroundSource,
-    /阶段 2：打开 Platform 登录页/i
+    /阶段 1：刷新 .*，然后打开\$\{getSignupEntryLabel\(currentState\)\}/i
   );
   assert.match(
     backgroundSource,
-    /第 2 步：正在打开 Platform 登录页/i
+    /阶段 2：打开\$\{getSignupEntryLabel\(await getState\(\)\)\}/i
+  );
+  assert.match(
+    backgroundSource,
+    /第 2 步：正在打开\$\{getSignupEntryLabel\(state\)\}/i
   );
   assert.match(
     backgroundSource,
@@ -90,11 +94,11 @@ test('step 2 has an auth-page-ready fallback when the completion signal is lost 
 
   assert.match(
     backgroundSource,
-    /async function waitForStep2CompletionSignalOrAuthPageReady\(\) \{/i
+    /async function waitForStep2CompletionSignalOrAuthPageReady\(initialState = \{\}\) \{/i
   );
   assert.match(
     backgroundSource,
-    /第 2 步：signup 页面在返回结果前已发生跳转，继续等待完成信号[\s\S]*await waitForStep2CompletionSignalOrAuthPageReady\(\);/i
+    /第 2 步：signup 页面在返回结果前已发生跳转，继续等待完成信号[\s\S]*await waitForStep2CompletionSignalOrAuthPageReady\(state\);/i
   );
   assert.match(
     backgroundSource,
@@ -215,7 +219,7 @@ test('step 2 retries once by reopening the platform login page after non-navigat
   );
   assert.match(
     backgroundSource,
-    /async function recoverStep2PlatformLogin\(error\) \{[\s\S]*正在重开 Platform 登录页并重试一次[\s\S]*reuseOrCreateTab\('signup-page',\s*OFFICIAL_SIGNUP_ENTRY_URL,\s*\{[\s\S]*reloadIfSameUrl:\s*true[\s\S]*\}\);/i
+    /async function recoverStep2PlatformLogin\(error\) \{[\s\S]*正在重开\$\{getSignupEntryLabel\(state\)\}并重试一次[\s\S]*reuseOrCreateTab\('signup-page',\s*getSignupEntryUrl\(state\),\s*\{[\s\S]*reloadIfSameUrl:\s*true[\s\S]*\}\);/i
   );
 });
 
@@ -492,7 +496,7 @@ test('step 3 recovery reopens step 2 in signup-entry mode before retrying creden
 
   assert.match(
     backgroundSource,
-    /async function recoverStep3PlatformLogin\(error,\s*options = \{\}\) \{[\s\S]*Reopening the platform login page[\s\S]*await executeStep2\(state,\s*\{[\s\S]*preferSignupEntry:\s*true[\s\S]*\}\);/i
+    /async function recoverStep3PlatformLogin\(error,\s*options = \{\}\) \{[\s\S]*Reopening \$\{getSignupEntryLabel\(state\)\}[\s\S]*await executeStep2\(state,\s*\{[\s\S]*preferSignupEntry:\s*true[\s\S]*\}\);/i
   );
 });
 
@@ -501,7 +505,7 @@ test('step 3 timeout recovery also reopens the platform login page in signup-ent
 
   assert.match(
     backgroundSource,
-    /async function recoverStep3OauthTimeout\(\) \{[\s\S]*Reopening the platform login page[\s\S]*await executeStep2\(state,\s*\{[\s\S]*preferSignupEntry:\s*true[\s\S]*\}\);/i
+    /async function recoverStep3OauthTimeout\(\) \{[\s\S]*Reopening \$\{getSignupEntryLabel\(state\)\}[\s\S]*await executeStep2\(state,\s*\{[\s\S]*preferSignupEntry:\s*true[\s\S]*\}\);/i
   );
 });
 

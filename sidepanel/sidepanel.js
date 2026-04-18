@@ -34,6 +34,14 @@ const displayLogRound = document.getElementById('display-log-round');
 const btnLogScrollBottom = document.getElementById('btn-log-scroll-bottom');
 const inputVpsUrl = document.getElementById('input-vps-url');
 const btnToggleVpsUrl = document.getElementById('btn-toggle-vps-url');
+const selectSignupEntry = document.getElementById('select-signup-entry');
+const selectBrowserBackend = document.getElementById('select-browser-backend');
+const rowFingerprintProvider = document.getElementById('row-fingerprint-provider');
+const selectFingerprintProvider = document.getElementById('select-fingerprint-provider');
+const rowRoxySettings = document.getElementById('row-roxy-settings');
+const inputRoxyApiBaseUrl = document.getElementById('input-roxy-api-base-url');
+const inputRoxyApiToken = document.getElementById('input-roxy-api-token');
+const inputRoxyWorkspaceId = document.getElementById('input-roxy-workspace-id');
 const selectOauthBackend = document.getElementById('select-oauth-backend');
 const rowCodex2ApiSettings = document.getElementById('row-codex2api-settings');
 const inputCodex2ApiBaseUrl = document.getElementById('input-codex2api-base-url');
@@ -92,8 +100,15 @@ const {
 } = EmailAddresses;
 const {
   buildTopSettingPayload,
+  DEFAULT_BROWSER_BACKEND,
+  DEFAULT_FINGERPRINT_PROVIDER,
+  DEFAULT_ROXY_API_BASE_URL,
+  DEFAULT_SIGNUP_ENTRY,
   getAutoContinueHint,
   getEmailInputPlaceholder,
+  sanitizeBrowserBackend,
+  sanitizeFingerprintProvider,
+  sanitizeSignupEntry,
 } = SidepanelSettings;
 const { shouldDisableStepButton, shouldEnableStopButton } = ManualStepControls;
 const { buildLogRoundClipboardText } = SidepanelLogCopy;
@@ -452,6 +467,24 @@ async function restoreState() {
     if (state.vpsUrl) {
       inputVpsUrl.value = state.vpsUrl;
     }
+    if (selectSignupEntry) {
+      selectSignupEntry.value = sanitizeSignupEntry(state.signupEntry);
+    }
+    if (selectBrowserBackend) {
+      selectBrowserBackend.value = sanitizeBrowserBackend(state.browserBackend);
+    }
+    if (selectFingerprintProvider) {
+      selectFingerprintProvider.value = sanitizeFingerprintProvider(state.fingerprintProvider);
+    }
+    if (state.roxyApiBaseUrl) {
+      inputRoxyApiBaseUrl.value = state.roxyApiBaseUrl;
+    }
+    if (state.roxyApiToken) {
+      inputRoxyApiToken.value = state.roxyApiToken;
+    }
+    if (state.roxyWorkspaceId) {
+      inputRoxyWorkspaceId.value = state.roxyWorkspaceId;
+    }
     selectOauthBackend.value = state.oauthBackend === 'codex2api' ? 'codex2api' : 'vps';
     if (state.codex2ApiBaseUrl) {
       inputCodex2ApiBaseUrl.value = state.codex2ApiBaseUrl;
@@ -518,6 +551,7 @@ async function restoreState() {
 
     updateAutoRunStatsDisplay(state.autoRunStats);
     updateStatusDisplay(state);
+    updateBrowserBackendUI();
     updateProgressCounter();
     updateOAuthBackendUI();
     updateMailProviderUI();
@@ -564,6 +598,17 @@ function updateOAuthBackendUI() {
   const useCodex2Api = selectOauthBackend.value === 'codex2api';
   document.getElementById('row-vps').style.display = useCodex2Api ? 'none' : '';
   rowCodex2ApiSettings.style.display = useCodex2Api ? '' : 'none';
+}
+
+function updateBrowserBackendUI() {
+  const browserBackend = sanitizeBrowserBackend(selectBrowserBackend?.value || DEFAULT_BROWSER_BACKEND);
+  const useFingerprint = browserBackend === 'fingerprint';
+  if (rowFingerprintProvider) {
+    rowFingerprintProvider.style.display = useFingerprint ? '' : 'none';
+  }
+  if (rowRoxySettings) {
+    rowRoxySettings.style.display = useFingerprint ? '' : 'none';
+  }
 }
 
 function getEmailSourceLabel() {
@@ -1517,6 +1562,12 @@ async function saveTopSetting(payload) {
 function collectTopSettingPayload(overrides = {}) {
   return buildTopSettingPayload({
     vpsUrl: inputVpsUrl.value,
+    signupEntry: selectSignupEntry ? selectSignupEntry.value : DEFAULT_SIGNUP_ENTRY,
+    browserBackend: selectBrowserBackend ? selectBrowserBackend.value : DEFAULT_BROWSER_BACKEND,
+    fingerprintProvider: selectFingerprintProvider ? selectFingerprintProvider.value : DEFAULT_FINGERPRINT_PROVIDER,
+    roxyApiBaseUrl: inputRoxyApiBaseUrl ? inputRoxyApiBaseUrl.value : DEFAULT_ROXY_API_BASE_URL,
+    roxyApiToken: inputRoxyApiToken ? inputRoxyApiToken.value : '',
+    roxyWorkspaceId: inputRoxyWorkspaceId ? inputRoxyWorkspaceId.value : '',
     oauthBackend: selectOauthBackend.value,
     codex2ApiBaseUrl: inputCodex2ApiBaseUrl.value,
     codex2ApiAdminKey: inputCodex2ApiAdminKey.value,
@@ -1587,6 +1638,43 @@ inputVpsUrl.addEventListener('input', async () => {
   const vpsUrl = inputVpsUrl.value.trim();
   await saveTopSetting({ vpsUrl });
 });
+
+if (selectSignupEntry) {
+  selectSignupEntry.addEventListener('change', async () => {
+    await saveTopSetting({ signupEntry: selectSignupEntry.value });
+  });
+}
+
+if (selectBrowserBackend) {
+  selectBrowserBackend.addEventListener('change', async () => {
+    updateBrowserBackendUI();
+    await saveTopSetting({ browserBackend: selectBrowserBackend.value });
+  });
+}
+
+if (selectFingerprintProvider) {
+  selectFingerprintProvider.addEventListener('change', async () => {
+    await saveTopSetting({ fingerprintProvider: selectFingerprintProvider.value });
+  });
+}
+
+if (inputRoxyApiBaseUrl) {
+  inputRoxyApiBaseUrl.addEventListener('change', async () => {
+    await saveTopSetting({ roxyApiBaseUrl: inputRoxyApiBaseUrl.value.trim() });
+  });
+}
+
+if (inputRoxyApiToken) {
+  inputRoxyApiToken.addEventListener('change', async () => {
+    await saveTopSetting({ roxyApiToken: inputRoxyApiToken.value });
+  });
+}
+
+if (inputRoxyWorkspaceId) {
+  inputRoxyWorkspaceId.addEventListener('change', async () => {
+    await saveTopSetting({ roxyWorkspaceId: inputRoxyWorkspaceId.value.trim() });
+  });
+}
 
 selectOauthBackend.addEventListener('change', async () => {
   updateOAuthBackendUI();
