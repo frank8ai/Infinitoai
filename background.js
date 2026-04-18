@@ -311,6 +311,7 @@ const DEFAULT_STATE = {
   cloudMailAdminPassword: '',
   cloudMailDomains: '',
   cloudMailSubdomain: '',
+  cloudMailEnableRandomSubdomain: false,
   oauthBackend: 'vps',
   codex2ApiBaseUrl: '',
   codex2ApiAdminKey: '',
@@ -1899,6 +1900,7 @@ async function handleMessage(message, sender) {
       if (message.payload.cloudMailAdminPassword !== undefined) persistentUpdates.cloudMailAdminPassword = message.payload.cloudMailAdminPassword;
       if (message.payload.cloudMailDomains !== undefined) persistentUpdates.cloudMailDomains = message.payload.cloudMailDomains;
       if (message.payload.cloudMailSubdomain !== undefined) persistentUpdates.cloudMailSubdomain = message.payload.cloudMailSubdomain;
+      if (message.payload.cloudMailEnableRandomSubdomain !== undefined) persistentUpdates.cloudMailEnableRandomSubdomain = message.payload.cloudMailEnableRandomSubdomain;
       if (message.payload.oauthBackend !== undefined) persistentUpdates.oauthBackend = message.payload.oauthBackend;
       if (message.payload.codex2ApiBaseUrl !== undefined) persistentUpdates.codex2ApiBaseUrl = message.payload.codex2ApiBaseUrl;
       if (message.payload.codex2ApiAdminKey !== undefined) persistentUpdates.codex2ApiAdminKey = message.payload.codex2ApiAdminKey;
@@ -2610,15 +2612,21 @@ function getCloudMailConfigFromState(state = {}) {
     adminPassword: state.cloudMailAdminPassword,
     domains: state.cloudMailDomains,
     subdomain: state.cloudMailSubdomain,
+    enableRandomSubdomain: state.cloudMailEnableRandomSubdomain,
   });
 }
 
 function isCloudMailEmailAllowed(state, email) {
   const config = getCloudMailConfigFromState(state);
   const normalizedEmail = String(email || '').trim().toLowerCase();
-  return config.domains.some((domain) =>
-    normalizedEmail.endsWith(`@${domain}`) || (config.subdomain && normalizedEmail.endsWith(`@${config.subdomain}.${domain}`))
-  );
+  const emailDomain = extractEmailDomain(normalizedEmail);
+  return config.domains.some((domain) => {
+    const resolvedDomain = config.subdomain ? `${config.subdomain}.${domain}` : domain;
+    if (normalizedEmail.endsWith(`@${resolvedDomain}`)) {
+      return true;
+    }
+    return Boolean(config.enableRandomSubdomain && emailDomain.endsWith(`.${resolvedDomain}`));
+  });
 }
 
 function isTmailorEmailAllowed(state, email) {
@@ -3347,6 +3355,7 @@ async function autoRunLoop(totalRuns, infiniteMode = false, options = {}) {
       cloudMailAdminPassword: prevState.cloudMailAdminPassword,
       cloudMailDomains: prevState.cloudMailDomains,
       cloudMailSubdomain: prevState.cloudMailSubdomain,
+      cloudMailEnableRandomSubdomain: prevState.cloudMailEnableRandomSubdomain,
       oauthBackend: prevState.oauthBackend,
       codex2ApiBaseUrl: prevState.codex2ApiBaseUrl,
       codex2ApiAdminKey: prevState.codex2ApiAdminKey,

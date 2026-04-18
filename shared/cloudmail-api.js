@@ -77,12 +77,16 @@
     const adminPassword = String(value.adminPassword || value.admin_password || '').trim();
     const domains = normalizeCloudMailDomains(value.domains || value.domain || value.default_domain);
     const subdomain = String(value.subdomain || value.cloudMailSubdomain || '').trim().replace(/^@+/, '').toLowerCase();
+    const enableRandomSubdomain = value.enableRandomSubdomain === true
+      || value.enable_random_subdomain === true
+      || String(value.enableRandomSubdomain || value.enable_random_subdomain || '').trim().toLowerCase() === 'true';
     return {
       baseUrl,
       adminEmail,
       adminPassword,
       domains,
       subdomain,
+      enableRandomSubdomain,
       timeoutMs: Math.max(1000, Number.parseInt(String(value.timeoutMs || value.timeout || 30000), 10) || 30000),
       maxAttempts: Math.max(1, Number.parseInt(String(value.maxAttempts || value.max_attempts || 20), 10) || 20),
       intervalMs: Math.max(0, Number.parseInt(String(value.intervalMs || value.interval_ms || 3000), 10) || 3000),
@@ -215,6 +219,7 @@
           headers: buildCloudMailHeaders(config),
           body: JSON.stringify({
             enablePrefix: false,
+            enableRandomSubdomain: config.enableRandomSubdomain,
             name: localPart,
             domain: resolvedDomain,
           }),

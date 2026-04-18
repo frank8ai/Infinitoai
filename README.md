@@ -131,9 +131,11 @@ Step 1 和 Step 9 都依赖这个地址。
 - `Password`：CloudMail admin 密码
 - `Domains`：可用邮箱域名，多个域名用英文逗号分隔
 - `Subdomain`：可选；填写后会生成 `name@subdomain.domain` 形式的邮箱
+- `Random subdomain`：可选；开启后会把 `Domains` 里的域名当作“基础域名”，交给 CloudMail Worker 自动分配随机四级子域，例如 `name@abc123.alpha.yzw.io`
 
 CloudMail 会在 Step 3 前自动创建邮箱，并在 Step 4 / Step 7 通过后台 API 查验证码。
 CloudMail admin 密码只保存在可信配置里，不会发给内容脚本，也不会出现在普通日志或状态广播中。
+如果你要跑随机四级域名，不要手工把随机前缀直接写进 `Domains`；应当填写 Worker `open_api/settings` 返回的 `randomSubdomainDomains` 里的基础域名，再开启 `Random subdomain`。
 
 ### `Mail`
 

@@ -62,6 +62,7 @@ const inputCloudMailAdminEmail = document.getElementById('input-cloudmail-admin-
 const inputCloudMailAdminPassword = document.getElementById('input-cloudmail-admin-password');
 const inputCloudMailDomains = document.getElementById('input-cloudmail-domains');
 const inputCloudMailSubdomain = document.getElementById('input-cloudmail-subdomain');
+const inputCloudMailRandomSubdomain = document.getElementById('input-cloudmail-random-subdomain');
 const inputRunCount = document.getElementById('input-run-count');
 const inputRunInfinite = document.getElementById('input-run-infinite');
 const rowTmailorDomains = document.getElementById('row-tmailor-domains');
@@ -492,6 +493,9 @@ async function restoreState() {
     }
     if (state.cloudMailSubdomain) {
       inputCloudMailSubdomain.value = state.cloudMailSubdomain;
+    }
+    if (inputCloudMailRandomSubdomain) {
+      inputCloudMailRandomSubdomain.checked = Boolean(state.cloudMailEnableRandomSubdomain);
     }
     inputRunCount.value = String(state.autoRunCount || DEFAULT_AUTO_RUN_COUNT);
     inputRunInfinite.checked = Boolean(state.autoRunInfinite);
@@ -1528,6 +1532,7 @@ function collectTopSettingPayload(overrides = {}) {
     cloudMailAdminPassword: inputCloudMailAdminPassword.value,
     cloudMailDomains: inputCloudMailDomains.value,
     cloudMailSubdomain: inputCloudMailSubdomain.value,
+    cloudMailEnableRandomSubdomain: inputCloudMailRandomSubdomain ? inputCloudMailRandomSubdomain.checked : false,
     autoRunCount: inputRunCount.value,
     autoRunInfinite: inputRunInfinite.checked,
     autoRotateMailProvider: inputAutoRotateMailProvider.checked,
@@ -1663,6 +1668,12 @@ inputCloudMailDomains.addEventListener('change', async () => {
 inputCloudMailSubdomain.addEventListener('change', async () => {
   await saveTopSetting({ cloudMailSubdomain: inputCloudMailSubdomain.value.trim() });
 });
+
+if (inputCloudMailRandomSubdomain) {
+  inputCloudMailRandomSubdomain.addEventListener('change', async () => {
+    await saveTopSetting({ cloudMailEnableRandomSubdomain: inputCloudMailRandomSubdomain.checked });
+  });
+}
 
 inputRunCount.addEventListener('input', async () => {
   const count = parseInt(inputRunCount.value, 10);
