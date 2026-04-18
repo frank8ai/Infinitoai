@@ -151,6 +151,48 @@ test('pollCloudMailVerificationCode polls newest matching OpenAI mail through th
   assert.equal(calls.length, 1);
 });
 
+test('pollCloudMailVerificationCode decodes CloudMail raw MIME subject headers', async () => {
+  const originalNow = Date.now;
+  Date.now = () => Date.parse('2026-04-18T04:32:00Z');
+  try {
+    const result = await pollCloudMailVerificationCode({
+      config: {
+        baseUrl: 'https://mail.example.com',
+        adminPassword: 'secret',
+      },
+      email: 'target@finchaintalk.com',
+      step: 4,
+      maxAttempts: 1,
+      fetchImpl: async (url) => {
+        assert.match(url, /address=target%40finchaintalk\.com/);
+        return createJsonResponse({
+          results: [
+            {
+              id: 'mail-raw-1',
+              source: 'bounces@example.com',
+              address: 'target@finchaintalk.com',
+              raw: [
+                'From: no-reply@tm.openai.com',
+                'To: target@finchaintalk.com',
+                'Subject: =?UTF-8?B?5L2g55qEIE9wZW5BSSDku6PnoIHkuLo=?= 074060',
+                'Date: Sat, 18 Apr 2026 04:31:18 +0000',
+                '',
+                'OpenAI verification mail',
+              ].join('\r\n'),
+              created_at: '2026-04-18 04:31:18',
+            },
+          ],
+        });
+      },
+    });
+
+    assert.equal(result.code, '074060');
+    assert.equal(result.mailId, 'mail-raw-1');
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
 test('pollCloudMailVerificationCode reports no matching mail after polling', async () => {
   let listCalls = 0;
   await assert.rejects(

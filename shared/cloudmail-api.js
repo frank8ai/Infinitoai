@@ -271,6 +271,78 @@
     return String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
+  function decodeBytes(bytes, charset = 'utf-8') {
+    if (!bytes.length) return '';
+    const normalizedCharset = String(charset || 'utf-8').trim() || 'utf-8';
+    try {
+      return new TextDecoder(normalizedCharset).decode(Uint8Array.from(bytes));
+    } catch {
+      return String.fromCharCode(...bytes);
+    }
+  }
+
+  function decodeBase64MimeWord(encoded, charset) {
+    const clean = String(encoded || '').replace(/\s+/g, '');
+    let binary = '';
+    if (typeof atob === 'function') {
+      binary = atob(clean);
+    } else if (typeof Buffer !== 'undefined') {
+      binary = Buffer.from(clean, 'base64').toString('binary');
+    }
+    const bytes = Array.from(binary, (char) => char.charCodeAt(0));
+    return decodeBytes(bytes, charset);
+  }
+
+  function decodeQuotedPrintableMimeWord(encoded, charset) {
+    const value = String(encoded || '').replace(/_/g, ' ');
+    const bytes = [];
+    for (let i = 0; i < value.length; i += 1) {
+      if (value[i] === '=' && /^[0-9a-f]{2}$/i.test(value.slice(i + 1, i + 3))) {
+        bytes.push(Number.parseInt(value.slice(i + 1, i + 3), 16));
+        i += 2;
+      } else {
+        bytes.push(value.charCodeAt(i) & 0xff);
+      }
+    }
+    return decodeBytes(bytes, charset);
+  }
+
+  function decodeMimeHeader(value) {
+    return String(value || '')
+      .replace(/\r?\n[\t ]+/g, ' ')
+      .replace(/=\?([^?]+)\?([bq])\?([^?]*)\?=/gi, (_match, charset, encoding, encoded) => {
+        try {
+          if (String(encoding).toLowerCase() === 'b') {
+            return decodeBase64MimeWord(encoded, charset);
+          }
+          return decodeQuotedPrintableMimeWord(encoded, charset);
+        } catch {
+          return _match;
+        }
+      })
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function getRawHeader(raw, headerName) {
+    const escapedName = String(headerName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = String(raw || '').match(new RegExp(`^${escapedName}:\\s*([^\\r\\n]*(?:\\r?\\n[\\t ][^\\r\\n]*)*)`, 'im'));
+    return match ? decodeMimeHeader(match[1]) : '';
+  }
+
+  function extractEmailAddress(value) {
+    const match = String(value || '').match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+    return match ? match[0].toLowerCase() : String(value || '').trim().toLowerCase();
+  }
+
+  function normalizeCloudMailTimestampValue(value) {
+    const text = String(value || '').trim();
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(text)) {
+      return `${text.replace(' ', 'T')}Z`;
+    }
+    return value;
+  }
+
   function extractVerificationCode(text) {
     const normalized = String(text || '');
     const semanticMatch = normalized.match(/(?:code\s*(?:is|:)?|验证码|代码为|verification code)[^\d]{0,24}(\d{6})/i);
@@ -280,12 +352,14 @@
   }
 
   function normalizeCloudMailItem(item = {}) {
-    const subject = String(item.subject || '');
     const raw = String(item.raw || item.source_raw || '');
-    const content = stripHtml(item.content || item.text || item.html || item.body || raw);
-    const rawSubject = raw.match(/^subject:\s*(.+)$/im)?.[1] || '';
-    const rawSender = raw.match(/^from:\s*(.+)$/im)?.[1] || '';
-    const sender = [item.sendName, item.sendEmail, item.from, item.source, rawSender].filter(Boolean).join(' ');
+    const content = decodeMimeHeader(stripHtml(item.content || item.text || item.html || item.body || raw));
+    const rawSubject = getRawHeader(raw, 'subject');
+    const rawSender = getRawHeader(raw, 'from');
+    const rawTo = getRawHeader(raw, 'to');
+    const subject = decodeMimeHeader(item.subject || rawSubject);
+    const sender = decodeMimeHeader([item.sendName, item.sendEmail, item.from, item.source, rawSender].filter(Boolean).join(' '));
+    const toEmail = extractEmailAddress(item.toEmail || item.to || item.address || rawTo);
     const timestamp = parseMailTimestampCandidates([
       item.createdAt,
       item.createTime,
@@ -293,16 +367,16 @@
       item.sendTime,
       item.timestamp,
       item.date,
-    ], { now: Date.now() });
+    ].map(normalizeCloudMailTimestampValue), { now: Date.now() });
     return {
       raw: item,
       mailId: String(item.emailId || item.id || item.mailId || `${subject}|${timestamp}`),
       sender,
-      subject: subject || rawSubject,
+      subject,
       content,
-      toEmail: String(item.toEmail || item.to || item.address || ''),
+      toEmail,
       timestamp,
-      combinedText: [sender, subject || rawSubject, content, raw].filter(Boolean).join('\n'),
+      combinedText: [sender, subject, content, raw].filter(Boolean).join('\n'),
     };
   }
 
