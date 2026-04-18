@@ -96,6 +96,7 @@
         <div class="data-select-shell">
           <select id="select-email-source" class="data-select">
             <option value="tmailor">TMailor（推荐）</option>
+            <option value="cloudmail">CloudMail（API 接码）</option>
             <option value="duck">Duck Address（邮件延迟）</option>
             <option value="33mail">33mail（干净ip）</option>
           </select>
@@ -133,6 +134,31 @@
       <div class="data-row" id="row-inbucket-mailbox" style="display:none;">
         <span class="data-label">Mailbox</span>
         <input type="text" id="input-inbucket-mailbox" class="data-input" placeholder="e.g. zju2001" />
+      </div>
+      <div class="data-row data-row-stack" id="row-cloudmail-settings" style="display:none;">
+        <span class="data-label">CloudMail</span>
+        <div class="mail-domain-groups">
+          <label class="mail-domain-group active">
+            <span class="mail-domain-title">API</span>
+            <input type="text" id="input-cloudmail-base-url" class="data-input" placeholder="https://mail.example.com" />
+          </label>
+          <label class="mail-domain-group active">
+            <span class="mail-domain-title">Admin Email</span>
+            <input type="text" id="input-cloudmail-admin-email" class="data-input" placeholder="optional for some CloudMail APIs" />
+          </label>
+          <label class="mail-domain-group active">
+            <span class="mail-domain-title">Password</span>
+            <input type="password" id="input-cloudmail-admin-password" class="data-input" placeholder="CloudMail admin password" />
+          </label>
+          <label class="mail-domain-group active">
+            <span class="mail-domain-title">Domains</span>
+            <input type="text" id="input-cloudmail-domains" class="data-input" placeholder="finchaintalk.com, temp-email-api.bitpowerhub.com" />
+          </label>
+          <label class="mail-domain-group active">
+            <span class="mail-domain-title">Subdomain</span>
+            <input type="text" id="input-cloudmail-subdomain" class="data-input" placeholder="optional, e.g. temp" />
+          </label>
+        </div>
       </div>
       <div class="data-row">
         <span class="data-label">Email</span>

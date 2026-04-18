@@ -41,6 +41,7 @@ test('sanitizeEmailSource falls back to tmailor for unsupported values', () => {
   assert.equal(sanitizeEmailSource('duck'), 'duck');
   assert.equal(sanitizeEmailSource('33mail'), '33mail');
   assert.equal(sanitizeEmailSource('tmailor'), 'tmailor');
+  assert.equal(sanitizeEmailSource('cloudmail'), 'cloudmail');
   assert.equal(sanitizeEmailSource('other'), DEFAULT_EMAIL_SOURCE);
 });
 
@@ -64,6 +65,11 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
       },
       inbucketHost: 'mail.test',
       inbucketMailbox: 'box-1',
+      cloudMailBaseUrl: ' https://cloudmail.example.com/ ',
+      cloudMailAdminEmail: 'admin@example.com',
+      cloudMailAdminPassword: 'secret',
+      cloudMailDomains: 'finchaintalk.com, temp-email-api.bitpowerhub.com',
+      cloudMailSubdomain: 'test',
       autoRunCount: '8',
       autoRunInfinite: 'true',
       autoRotateMailProvider: 'true',
@@ -80,6 +86,11 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
       },
       inbucketHost: 'mail.test',
       inbucketMailbox: 'box-1',
+      cloudMailBaseUrl: ' https://cloudmail.example.com/ ',
+      cloudMailAdminEmail: 'admin@example.com',
+      cloudMailAdminPassword: 'secret',
+      cloudMailDomains: 'finchaintalk.com, temp-email-api.bitpowerhub.com',
+      cloudMailSubdomain: 'test',
       autoRunCount: 8,
       autoRunInfinite: true,
       autoRotateMailProvider: true,
@@ -99,6 +110,11 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
       },
       inbucketHost: '',
       inbucketMailbox: '',
+      cloudMailBaseUrl: '',
+      cloudMailAdminEmail: '',
+      cloudMailAdminPassword: '',
+      cloudMailDomains: '',
+      cloudMailSubdomain: '',
       autoRunCount: DEFAULT_AUTO_RUN_COUNT,
       autoRunInfinite: DEFAULT_AUTO_RUN_INFINITE,
       autoRotateMailProvider: DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
@@ -107,7 +123,22 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
 
   assert.deepEqual(
     PERSISTED_TOP_SETTING_KEYS,
-    ['vpsUrl', 'mailProvider', 'emailSource', 'mailDomainSettings', 'inbucketHost', 'inbucketMailbox', 'autoRunCount', 'autoRunInfinite', 'autoRotateMailProvider']
+    [
+      'vpsUrl',
+      'mailProvider',
+      'emailSource',
+      'mailDomainSettings',
+      'inbucketHost',
+      'inbucketMailbox',
+      'cloudMailBaseUrl',
+      'cloudMailAdminEmail',
+      'cloudMailAdminPassword',
+      'cloudMailDomains',
+      'cloudMailSubdomain',
+      'autoRunCount',
+      'autoRunInfinite',
+      'autoRotateMailProvider',
+    ]
   );
 });
 
@@ -123,6 +154,11 @@ test('buildTopSettingPayload keeps the current email source and related settings
       },
       inbucketHost: ' mailbox.test ',
       inbucketMailbox: ' box-7 ',
+      cloudMailBaseUrl: ' https://cloudmail.example.com/ ',
+      cloudMailAdminEmail: ' admin@example.com ',
+      cloudMailAdminPassword: ' secret ',
+      cloudMailDomains: ' finchaintalk.com, @temp-email-api.bitpowerhub.com ',
+      cloudMailSubdomain: ' api ',
       autoRunCount: '6',
       autoRunInfinite: 'true',
       autoRotateMailProvider: 'false',
@@ -138,6 +174,11 @@ test('buildTopSettingPayload keeps the current email source and related settings
       },
       inbucketHost: 'mailbox.test',
       inbucketMailbox: 'box-7',
+      cloudMailBaseUrl: 'https://cloudmail.example.com',
+      cloudMailAdminEmail: 'admin@example.com',
+      cloudMailAdminPassword: 'secret',
+      cloudMailDomains: 'finchaintalk.com, @temp-email-api.bitpowerhub.com',
+      cloudMailSubdomain: 'api',
       autoRunCount: 6,
       autoRunInfinite: true,
       autoRotateMailProvider: false,
@@ -163,6 +204,24 @@ test('getAutoContinueHint updates the TMailor hint to describe clicking New Emai
       autoRotateMailProvider: false,
     }),
     'Click New Email on TMailor, then paste the generated address into Email. Auto run will resume automatically.'
+  );
+});
+
+test('CloudMail settings explain API-based mailbox generation', () => {
+  assert.equal(
+    getEmailInputPlaceholder({
+      emailSource: 'cloudmail',
+      mailProvider: '163',
+    }),
+    'CloudMail will generate an address automatically'
+  );
+
+  assert.equal(
+    getAutoContinueHint({
+      emailSource: 'cloudmail',
+      mailProvider: '163',
+    }),
+    'Use Auto to generate a CloudMail address and poll codes through the API.'
   );
 });
 

@@ -19,6 +19,11 @@
     'mailDomainSettings',
     'inbucketHost',
     'inbucketMailbox',
+    'cloudMailBaseUrl',
+    'cloudMailAdminEmail',
+    'cloudMailAdminPassword',
+    'cloudMailDomains',
+    'cloudMailSubdomain',
     'autoRunCount',
     'autoRunInfinite',
     'autoRotateMailProvider',
@@ -60,7 +65,7 @@
   }
 
   function sanitizeEmailSource(value) {
-    return value === '33mail' || value === 'duck' || value === 'tmailor'
+    return value === '33mail' || value === 'duck' || value === 'tmailor' || value === 'cloudmail'
       ? value
       : DEFAULT_EMAIL_SOURCE;
   }
@@ -85,6 +90,11 @@
       mailDomainSettings: normalizeMailDomainSettings(value.mailDomainSettings),
       inbucketHost: typeof value.inbucketHost === 'string' ? value.inbucketHost : '',
       inbucketMailbox: typeof value.inbucketMailbox === 'string' ? value.inbucketMailbox : '',
+      cloudMailBaseUrl: typeof value.cloudMailBaseUrl === 'string' ? value.cloudMailBaseUrl : '',
+      cloudMailAdminEmail: typeof value.cloudMailAdminEmail === 'string' ? value.cloudMailAdminEmail : '',
+      cloudMailAdminPassword: typeof value.cloudMailAdminPassword === 'string' ? value.cloudMailAdminPassword : '',
+      cloudMailDomains: typeof value.cloudMailDomains === 'string' ? value.cloudMailDomains : '',
+      cloudMailSubdomain: typeof value.cloudMailSubdomain === 'string' ? value.cloudMailSubdomain : '',
       autoRunCount: sanitizeAutoRunCount(value.autoRunCount),
       autoRunInfinite: sanitizeInfiniteAutoRun(value.autoRunInfinite),
       autoRotateMailProvider: sanitizeAutoRotateMailProvider(value.autoRotateMailProvider),
@@ -98,6 +108,11 @@
       vpsUrl: normalized.vpsUrl.trim(),
       inbucketHost: normalized.inbucketHost.trim(),
       inbucketMailbox: normalized.inbucketMailbox.trim(),
+      cloudMailBaseUrl: normalized.cloudMailBaseUrl.trim().replace(/\/+$/, ''),
+      cloudMailAdminEmail: normalized.cloudMailAdminEmail.trim(),
+      cloudMailAdminPassword: normalized.cloudMailAdminPassword.trim(),
+      cloudMailDomains: normalized.cloudMailDomains.trim(),
+      cloudMailSubdomain: normalized.cloudMailSubdomain.trim().replace(/^@+/, '').toLowerCase(),
     };
   }
 
@@ -114,6 +129,9 @@
 
     if (normalizedSource === 'tmailor') {
       return 'Paste the generated TMailor address here manually';
+    }
+    if (normalizedSource === 'cloudmail') {
+      return 'CloudMail will generate an address automatically';
     }
 
     return 'Paste DuckDuckGo email';
@@ -136,6 +154,9 @@
 
     if (normalizedSource === 'tmailor') {
       return 'Click New Email on TMailor, then paste the generated address into Email. Auto run will resume automatically.';
+    }
+    if (normalizedSource === 'cloudmail') {
+      return 'Use Auto to generate a CloudMail address and poll codes through the API.';
     }
 
     return 'Use Auto to fetch Duck email, or paste manually, then continue';

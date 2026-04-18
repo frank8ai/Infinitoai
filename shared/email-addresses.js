@@ -15,7 +15,7 @@
   });
 
   function sanitizeEmailSource(value) {
-    return value === '33mail' || value === 'duck' || value === 'tmailor'
+    return value === '33mail' || value === 'duck' || value === 'tmailor' || value === 'cloudmail'
       ? value
       : DEFAULT_EMAIL_SOURCE;
   }

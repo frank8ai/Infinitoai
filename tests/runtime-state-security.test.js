@@ -10,7 +10,7 @@ function readProjectFile(relativePath) {
 test('background keeps full state trusted-only and exposes a sanitized runtime state for content scripts', () => {
   const backgroundSource = readProjectFile('background.js');
 
-  for (const key of ['password', 'customPassword', 'oauthUrl', 'localhostUrl', 'accounts', 'tmailorAccessToken']) {
+  for (const key of ['password', 'customPassword', 'oauthUrl', 'localhostUrl', 'accounts', 'tmailorAccessToken', 'cloudMailAdminPassword']) {
     assert.match(
       backgroundSource,
       new RegExp(`SENSITIVE_STATE_KEYS[\\s\\S]*['"]${key}['"]`),

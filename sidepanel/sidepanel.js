@@ -50,6 +50,12 @@ const rowInbucketHost = document.getElementById('row-inbucket-host');
 const inputInbucketHost = document.getElementById('input-inbucket-host');
 const rowInbucketMailbox = document.getElementById('row-inbucket-mailbox');
 const inputInbucketMailbox = document.getElementById('input-inbucket-mailbox');
+const rowCloudMailSettings = document.getElementById('row-cloudmail-settings');
+const inputCloudMailBaseUrl = document.getElementById('input-cloudmail-base-url');
+const inputCloudMailAdminEmail = document.getElementById('input-cloudmail-admin-email');
+const inputCloudMailAdminPassword = document.getElementById('input-cloudmail-admin-password');
+const inputCloudMailDomains = document.getElementById('input-cloudmail-domains');
+const inputCloudMailSubdomain = document.getElementById('input-cloudmail-subdomain');
 const inputRunCount = document.getElementById('input-run-count');
 const inputRunInfinite = document.getElementById('input-run-infinite');
 const rowTmailorDomains = document.getElementById('row-tmailor-domains');
@@ -453,6 +459,21 @@ async function restoreState() {
     if (state.inbucketMailbox) {
       inputInbucketMailbox.value = state.inbucketMailbox;
     }
+    if (state.cloudMailBaseUrl) {
+      inputCloudMailBaseUrl.value = state.cloudMailBaseUrl;
+    }
+    if (state.cloudMailAdminEmail) {
+      inputCloudMailAdminEmail.value = state.cloudMailAdminEmail;
+    }
+    if (state.cloudMailAdminPassword) {
+      inputCloudMailAdminPassword.value = state.cloudMailAdminPassword;
+    }
+    if (state.cloudMailDomains) {
+      inputCloudMailDomains.value = state.cloudMailDomains;
+    }
+    if (state.cloudMailSubdomain) {
+      inputCloudMailSubdomain.value = state.cloudMailSubdomain;
+    }
     inputRunCount.value = String(state.autoRunCount || DEFAULT_AUTO_RUN_COUNT);
     inputRunInfinite.checked = Boolean(state.autoRunInfinite);
 
@@ -509,14 +530,16 @@ function updateAutoRunStatsDisplay(stats = {}) {
 function updateMailProviderUI() {
   const source = sanitizeEmailSource(selectEmailSource.value);
   const useInbucket = selectMailProvider.value === 'inbucket';
-  rowMailProvider.style.display = source === 'tmailor' ? 'none' : '';
-  rowInbucketHost.style.display = useInbucket ? '' : 'none';
-  rowInbucketMailbox.style.display = useInbucket ? '' : 'none';
+  const usesApiMailbox = source === 'tmailor' || source === 'cloudmail';
+  rowMailProvider.style.display = usesApiMailbox ? 'none' : '';
+  rowInbucketHost.style.display = !usesApiMailbox && useInbucket ? '' : 'none';
+  rowInbucketMailbox.style.display = !usesApiMailbox && useInbucket ? '' : 'none';
 }
 
 function getEmailSourceLabel() {
   if (selectEmailSource.value === '33mail') return '33mail';
   if (selectEmailSource.value === 'tmailor') return 'TMailor';
+  if (selectEmailSource.value === 'cloudmail') return 'CloudMail';
   return 'Duck';
 }
 
@@ -540,12 +563,14 @@ function updateEmailSourceUI() {
   const emailSource = sanitizeEmailSource(selectEmailSource.value);
   const is33Mail = emailSource === '33mail';
   const isTmailor = emailSource === 'tmailor';
+  const isCloudMail = emailSource === 'cloudmail';
   const currentProvider = selectMailProvider.value;
   const isGroupedMailProvider = currentProvider === '163' || currentProvider === 'qq';
 
   row33MailSettings.style.display = is33Mail ? '' : 'none';
   row33MailRotate.style.display = is33Mail ? '' : 'none';
   rowTmailorDomains.style.display = isTmailor ? '' : 'none';
+  if (rowCloudMailSettings) rowCloudMailSettings.style.display = isCloudMail ? '' : 'none';
   update33MailGroupUI();
   updateMailProviderUI();
   renderTmailorApiStatus();
@@ -1150,7 +1175,7 @@ async function fetchEmailAddress(options = {}) {
       : response.mailProvider === '163'
         ? '163'
         : getCurrentProviderLabel();
-    const isGeneratedSource = response.emailSource === '33mail' || response.emailSource === 'tmailor';
+    const isGeneratedSource = response.emailSource === '33mail' || response.emailSource === 'tmailor' || response.emailSource === 'cloudmail';
     showToast(
       `${isGeneratedSource ? 'Ready' : 'Fetched'} ${response.email}${response.emailSource === '33mail' ? ` · ${providerLabel}` : ''}`,
       'success',
@@ -1280,7 +1305,7 @@ document.querySelectorAll('.step-btn').forEach(btn => {
     await persistCurrentTopSettings();
     if (step === 3) {
       const email = inputEmail.value.trim();
-      if (!['33mail', 'tmailor'].includes(sanitizeEmailSource(selectEmailSource.value)) && !email) {
+      if (!['33mail', 'tmailor', 'cloudmail'].includes(sanitizeEmailSource(selectEmailSource.value)) && !email) {
         showToast('Please paste email address or use Auto first', 'warn');
         return;
       }
@@ -1467,6 +1492,11 @@ function collectTopSettingPayload(overrides = {}) {
     mailDomainSettings: mailDomainSettingsState,
     inbucketHost: inputInbucketHost.value,
     inbucketMailbox: inputInbucketMailbox.value,
+    cloudMailBaseUrl: inputCloudMailBaseUrl.value,
+    cloudMailAdminEmail: inputCloudMailAdminEmail.value,
+    cloudMailAdminPassword: inputCloudMailAdminPassword.value,
+    cloudMailDomains: inputCloudMailDomains.value,
+    cloudMailSubdomain: inputCloudMailSubdomain.value,
     autoRunCount: inputRunCount.value,
     autoRunInfinite: inputRunInfinite.checked,
     autoRotateMailProvider: inputAutoRotateMailProvider.checked,
@@ -1560,6 +1590,26 @@ inputInbucketMailbox.addEventListener('change', async () => {
 
 inputInbucketHost.addEventListener('change', async () => {
   await saveTopSetting({ inbucketHost: inputInbucketHost.value.trim() });
+});
+
+inputCloudMailBaseUrl.addEventListener('change', async () => {
+  await saveTopSetting({ cloudMailBaseUrl: inputCloudMailBaseUrl.value.trim() });
+});
+
+inputCloudMailAdminEmail.addEventListener('change', async () => {
+  await saveTopSetting({ cloudMailAdminEmail: inputCloudMailAdminEmail.value.trim() });
+});
+
+inputCloudMailAdminPassword.addEventListener('change', async () => {
+  await saveTopSetting({ cloudMailAdminPassword: inputCloudMailAdminPassword.value });
+});
+
+inputCloudMailDomains.addEventListener('change', async () => {
+  await saveTopSetting({ cloudMailDomains: inputCloudMailDomains.value.trim() });
+});
+
+inputCloudMailSubdomain.addEventListener('change', async () => {
+  await saveTopSetting({ cloudMailSubdomain: inputCloudMailSubdomain.value.trim() });
 });
 
 inputRunCount.addEventListener('input', async () => {

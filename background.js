@@ -1,6 +1,6 @@
 // background.js — Service Worker: orchestration, state, tab management, message routing
 
-importScripts('shared/email-addresses.js', 'shared/mail-provider-rotation.js', 'shared/tmailor-domains.js', 'shared/tmailor-api.js', 'shared/tmailor-errors.js', 'shared/tmailor-mailbox-strategy.js', 'shared/tmailor-verification-profiles.js', 'shared/flow-recovery.js', 'shared/content-script-queue.js', 'shared/login-verification-codes.js', 'data/names.js', 'shared/flow-runner.js', 'shared/runtime-errors.js', 'shared/auto-run.js', 'shared/auto-run-failure-stats.js', 'shared/duck-mail-errors.js', 'shared/sidepanel-settings.js', 'shared/tab-reclaim.js');
+importScripts('shared/email-addresses.js', 'shared/mail-provider-rotation.js', 'shared/mail-matching.js', 'shared/mail-freshness.js', 'shared/latest-mail.js', 'shared/tmailor-domains.js', 'shared/tmailor-api.js', 'shared/cloudmail-api.js', 'shared/tmailor-errors.js', 'shared/tmailor-mailbox-strategy.js', 'shared/tmailor-verification-profiles.js', 'shared/flow-recovery.js', 'shared/content-script-queue.js', 'shared/login-verification-codes.js', 'data/names.js', 'shared/flow-runner.js', 'shared/runtime-errors.js', 'shared/auto-run.js', 'shared/auto-run-failure-stats.js', 'shared/duck-mail-errors.js', 'shared/sidepanel-settings.js', 'shared/tab-reclaim.js');
 
 const LOG_PREFIX = '[Infinitoai:bg]';
 const DUCK_AUTOFILL_URL = 'https://duckduckgo.com/email/settings/autofill';
@@ -62,6 +62,7 @@ const { mergeLoginVerificationCodeExclusions } = LoginVerificationCodes;
 const { DEFAULT_EMAIL_SOURCE, generate33MailAddress, get33MailDomainForProvider, sanitizeEmailSource } = EmailAddresses;
 const { chooseMailProviderForAutoRun, getConfiguredRotatableMailProviders, getNextMailProviderAvailabilityTimestamp, isRotatableMailProvider, pruneMailProviderUsage, recordMailProviderUsage } = MailProviderRotation;
 const { DEFAULT_TMAILOR_DOMAIN_STATE, extractEmailDomain, isAllowedTmailorDomain, mergeTmailorDomainStates, normalizeTmailorDomainState, recordTmailorDomainFailure, recordTmailorDomainSuccess, shouldBlacklistTmailorDomainForError } = TmailorDomains;
+const { createCloudMailEmail, normalizeCloudMailConfig, pollCloudMailVerificationCode } = CloudMailApi;
 const {
   checkTmailorApiConnectivity,
   createTmailorApiCaptchaCooldownUntil,
@@ -152,6 +153,7 @@ const SENSITIVE_STATE_KEYS = [
   'lastSignupVerificationCode',
   'logs',
   'logRounds',
+  'cloudMailAdminPassword',
 ];
 
 const SENSITIVE_DATA_UPDATE_KEYS = new Set([
@@ -165,6 +167,7 @@ const SENSITIVE_DATA_UPDATE_KEYS = new Set([
   'lastSignupVerificationCode',
   'logs',
   'logRounds',
+  'cloudMailAdminPassword',
 ]);
 
 let automationWindowId = null;
@@ -298,6 +301,11 @@ const DEFAULT_STATE = {
   mailProvider: '163', // 'qq' or '163'
   inbucketHost: '',
   inbucketMailbox: '',
+  cloudMailBaseUrl: '',
+  cloudMailAdminEmail: '',
+  cloudMailAdminPassword: '',
+  cloudMailDomains: '',
+  cloudMailSubdomain: '',
   autoRunCount: DEFAULT_AUTO_RUN_COUNT,
   autoRunInfinite: DEFAULT_AUTO_RUN_INFINITE,
   autoRunStats: normalizeAutoRunStats({
@@ -587,6 +595,35 @@ async function ensureVpsOriginPermission(vpsUrl) {
 
   if (!granted) {
     throw new Error(`VPS origin permission was not granted for ${originPattern}. Approve the VPS panel origin in the extension prompt, then retry.`);
+  }
+
+  return originPattern;
+}
+
+async function ensureCloudMailOriginPermission(baseUrl) {
+  const originPattern = getOriginPermissionPatternFromUrl(baseUrl);
+  if (!originPattern) {
+    throw new Error('Invalid CloudMail API address. Enter a valid http or https CloudMail address in the Side Panel.');
+  }
+
+  if (!chrome.permissions?.contains || !chrome.permissions?.request) {
+    return originPattern;
+  }
+
+  const alreadyGranted = await chrome.permissions.contains({ origins: [originPattern] });
+  if (alreadyGranted) {
+    return originPattern;
+  }
+
+  let granted = false;
+  try {
+    granted = await chrome.permissions.request({ origins: [originPattern] });
+  } catch {
+    throw new Error(`CloudMail origin permission was not granted for ${originPattern}. Approve the CloudMail API origin, then retry.`);
+  }
+
+  if (!granted) {
+    throw new Error(`CloudMail origin permission was not granted for ${originPattern}. Approve the CloudMail API origin, then retry.`);
   }
 
   return originPattern;
@@ -1817,6 +1854,11 @@ async function handleMessage(message, sender) {
       if (message.payload.mailDomainSettings !== undefined) persistentUpdates.mailDomainSettings = message.payload.mailDomainSettings;
       if (message.payload.inbucketHost !== undefined) persistentUpdates.inbucketHost = message.payload.inbucketHost;
       if (message.payload.inbucketMailbox !== undefined) persistentUpdates.inbucketMailbox = message.payload.inbucketMailbox;
+      if (message.payload.cloudMailBaseUrl !== undefined) persistentUpdates.cloudMailBaseUrl = message.payload.cloudMailBaseUrl;
+      if (message.payload.cloudMailAdminEmail !== undefined) persistentUpdates.cloudMailAdminEmail = message.payload.cloudMailAdminEmail;
+      if (message.payload.cloudMailAdminPassword !== undefined) persistentUpdates.cloudMailAdminPassword = message.payload.cloudMailAdminPassword;
+      if (message.payload.cloudMailDomains !== undefined) persistentUpdates.cloudMailDomains = message.payload.cloudMailDomains;
+      if (message.payload.cloudMailSubdomain !== undefined) persistentUpdates.cloudMailSubdomain = message.payload.cloudMailSubdomain;
       if (message.payload.autoRunCount !== undefined) persistentUpdates.autoRunCount = sanitizeAutoRunCount(message.payload.autoRunCount);
       if (message.payload.autoRunInfinite !== undefined) persistentUpdates.autoRunInfinite = sanitizeInfiniteAutoRun(message.payload.autoRunInfinite);
       if (message.payload.autoRotateMailProvider !== undefined) persistentUpdates.autoRotateMailProvider = sanitizeAutoRotateMailProvider(message.payload.autoRotateMailProvider);
@@ -2478,6 +2520,7 @@ function getCurrentAutoRotateMailProvider(state) {
 function getEmailSourceLabel(emailSource) {
   if (emailSource === '33mail') return '33mail';
   if (emailSource === 'tmailor') return 'TMailor';
+  if (emailSource === 'cloudmail') return 'CloudMail';
   return 'Duck Mail';
 }
 
@@ -2488,11 +2531,36 @@ function getEmailWaitHint(emailSource) {
   if (emailSource === 'tmailor') {
     return 'Open TMailor and generate a supported mailbox, or switch to com+whitelist mode and continue';
   }
+  if (emailSource === 'cloudmail') {
+    return 'Configure CloudMail API settings, then generate an email automatically';
+  }
   return 'Fetch Duck email or paste manually, then continue';
 }
 
 function isTmailorSource(state) {
   return getCurrentEmailSource(state) === 'tmailor';
+}
+
+function isCloudMailSource(state) {
+  return getCurrentEmailSource(state) === 'cloudmail';
+}
+
+function getCloudMailConfigFromState(state = {}) {
+  return normalizeCloudMailConfig({
+    baseUrl: state.cloudMailBaseUrl,
+    adminEmail: state.cloudMailAdminEmail,
+    adminPassword: state.cloudMailAdminPassword,
+    domains: state.cloudMailDomains,
+    subdomain: state.cloudMailSubdomain,
+  });
+}
+
+function isCloudMailEmailAllowed(state, email) {
+  const config = getCloudMailConfigFromState(state);
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  return config.domains.some((domain) =>
+    normalizedEmail.endsWith(`@${domain}`) || (config.subdomain && normalizedEmail.endsWith(`@${config.subdomain}.${domain}`))
+  );
 }
 
 function isTmailorEmailAllowed(state, email) {
@@ -2634,6 +2702,22 @@ async function generate33MailEmail(options = {}) {
   return email;
 }
 
+async function generateCloudMailEmail(options = {}) {
+  throwIfStopped();
+  const { generateNew = true } = options;
+  const state = await getState();
+  if (!generateNew && state.email && isCloudMailEmailAllowed(state, state.email)) {
+    return state.email;
+  }
+
+  const config = getCloudMailConfigFromState(state);
+  await ensureCloudMailOriginPermission(config.baseUrl);
+  const result = await createCloudMailEmail(config);
+  await setEmailState(result.email);
+  await addLog(`CloudMail 邮箱已生成：${result.email}`, 'ok');
+  return result.email;
+}
+
 async function fetchTmailorEmail(options = {}) {
   throwIfStopped();
   const { generateNew = true } = options;
@@ -2733,6 +2817,9 @@ async function fetchEmailAddress(options = {}) {
   }
   if (emailSource === 'tmailor') {
     return await fetchTmailorEmail(options);
+  }
+  if (emailSource === 'cloudmail') {
+    return await generateCloudMailEmail(options);
   }
   return await fetchDuckEmail(options);
 }
@@ -3197,6 +3284,11 @@ async function autoRunLoop(totalRuns, infiniteMode = false, options = {}) {
         mailProvider: activeMailProvider,
         inbucketHost: prevState.inbucketHost,
         inbucketMailbox: prevState.inbucketMailbox,
+        cloudMailBaseUrl: prevState.cloudMailBaseUrl,
+        cloudMailAdminEmail: prevState.cloudMailAdminEmail,
+        cloudMailAdminPassword: prevState.cloudMailAdminPassword,
+        cloudMailDomains: prevState.cloudMailDomains,
+        cloudMailSubdomain: prevState.cloudMailSubdomain,
         autoRunCount: sanitizeAutoRunCount(prevState.autoRunCount),
         autoRunInfinite: sanitizeInfiniteAutoRun(prevState.autoRunInfinite),
         autoRunStats: prevState.autoRunStats || { successfulRuns: autoRunSuccessfulRuns, failedRuns: autoRunFailedRuns },
@@ -3637,6 +3729,10 @@ async function executeStep3(state) {
     email = await fetchTmailorEmail({ generateNew: true });
   }
 
+  if (emailSource === 'cloudmail' && (!email || !isCloudMailEmailAllowed(state, email))) {
+    email = await generateCloudMailEmail({ generateNew: true });
+  }
+
   if (!email) {
     throw new Error('No email address. Paste email in Side Panel first.');
   }
@@ -3768,6 +3864,9 @@ async function waitForStep3CompletionSignalOrRecoveredAuthState() {
 function getMailConfig(state) {
   if (getCurrentEmailSource(state) === 'tmailor') {
     return { source: 'tmailor-mail', url: 'https://tmailor.com/', label: 'TMailor' };
+  }
+  if (getCurrentEmailSource(state) === 'cloudmail') {
+    return { source: 'cloudmail-api', label: 'CloudMail', apiOnly: true };
   }
   const provider = state.mailProvider || 'qq';
   if (provider === '163') {
@@ -3914,6 +4013,35 @@ async function pollVerificationCodeFromMail(step, mail, payload) {
       }
       await addLog(`第 ${step} 步：改为使用 TMailor 页面 DOM 流程轮询收件箱。`, 'warn');
     }
+  }
+
+  if (mail.source === 'cloudmail-api') {
+    const config = getCloudMailConfigFromState(state);
+    await ensureCloudMailOriginPermission(config.baseUrl);
+    await addLog(`Step ${step}: Polling CloudMail API for ${state.email || 'current mailbox'}...`, 'info');
+    const apiResult = await pollCloudMailVerificationCode({
+      config,
+      email: state.email,
+      step,
+      filterAfterTimestamp: payload?.filterAfterTimestamp,
+      excludeCodes: payload?.excludeCodes,
+      maxAttempts: payload?.maxAttempts,
+      intervalMs: payload?.intervalMs,
+      throwIfStopped,
+      sleep: sleepWithStop,
+      onPollStart: async (event) => {
+        await assertVerificationMailStepNotBlockedDuringPolling(step);
+        await addLog(`Step ${step}: CloudMail API 开始轮询 ${event.attempt}/${event.maxAttempts}...`, 'info');
+      },
+      onPollAttempt: async (event) => {
+        await assertVerificationMailStepNotBlockedDuringPolling(step);
+        const candidateLabel = event.candidateFound ? '发现候选邮件' : '暂未发现匹配邮件';
+        await addLog(`Step ${step}: CloudMail API 轮询 ${event.attempt}/${event.maxAttempts}（${candidateLabel}）`, 'info');
+      },
+    });
+    markAutoRunCurrentSuccessMode('api');
+    await addLog(`第 ${step} 步：CloudMail API 已返回验证码 ${apiResult.code}。`, 'ok');
+    return apiResult;
   }
 
   let result;
@@ -4817,6 +4945,8 @@ async function executeVerificationMailStep(step, state, options) {
   });
   if (useTmailorApiMailboxOnly) {
     await addLog(`Step ${step}: ${getTmailorApiOnlyPollingMessage(state.email)}`, 'info');
+  } else if (mail.apiOnly) {
+    await addLog(`Step ${step}: Using ${mail.label} API directly...`);
   } else {
     await addLog(`Step ${step}: Opening ${mail.label}...`);
     await ensureMailTabReady(mail, {

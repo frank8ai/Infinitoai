@@ -43,14 +43,16 @@
 
 ### 邮箱源能力
 
-支持三种“注册邮箱来源”：
+支持四种“注册邮箱来源”：
 
 - `Duck Address`
 - `33mail`
 - `TMailor`
+- `CloudMail`
 
 注意：`Source` 决定 Step 3 使用哪个注册邮箱；`Mail` 决定 Step 4 / Step 7 去哪里收验证码。  
 其中 `TMailor` 是一体化方案，既能生成邮箱，也能轮询验证码，因此选中后会隐藏普通 `Mail` 选择器。
+`CloudMail` 也是一体化方案，会通过自部署 Cloudflare 邮箱 API 创建地址并轮询验证码，不需要打开邮箱网页。
 
 ### 收件通道能力
 
@@ -61,6 +63,7 @@
 - `Inbucket`
 - `TMailor 页面 DOM`
 - `TMailor API`
+- `CloudMail API`
 
 ## 环境要求
 
@@ -105,6 +108,18 @@ https://your-panel.example.com/management.html#/oauth
 ```
 
 Step 1 和 Step 9 都依赖这个地址。
+
+### `CloudMail`
+
+当 `Source = CloudMail` 时，需要填写：
+
+- `API`：CloudMail Worker 地址，例如 `https://temp-email-api.example.com`
+- `Password`：CloudMail admin 密码
+- `Domains`：可用邮箱域名，多个域名用英文逗号分隔
+- `Subdomain`：可选；填写后会生成 `name@subdomain.domain` 形式的邮箱
+
+CloudMail 会在 Step 3 前自动创建邮箱，并在 Step 4 / Step 7 通过后台 API 查验证码。
+CloudMail admin 密码只保存在可信配置里，不会发给内容脚本，也不会出现在普通日志或状态广播中。
 
 ### `Mail`
 
@@ -590,6 +605,7 @@ data/                            姓名、域名等静态数据
 - 顶部配置会做持久化保存
 - 不会硬编码你的 VPS、邮箱或密码
 - 内容脚本只能读取净化后的运行状态，不会拿到密码、OAuth URL、localhost callback、TMailor token 或账号历史
+- 内容脚本也不会拿到 CloudMail admin 密码
 - Console 日志、Toast、复制出来的日志历史都会先做脱敏处理
 - 普通状态广播不会再携带密码、OAuth URL、localhost callback 或 TMailor token
 - 扩展不再请求 `<all_urls>`；固定权限只覆盖 OpenAI、邮箱和 TMailor 等已知站点，VPS 面板域名会在使用时按需授权
@@ -614,4 +630,5 @@ node .\tests\vps-panel.test.js
 node .\tests\runtime-state-security.test.js
 node .\tests\log-redaction.test.js
 node .\tests\data-update-redaction.test.js
+node .\tests\cloudmail-api.test.js
 ```

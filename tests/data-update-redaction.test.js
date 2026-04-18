@@ -14,7 +14,7 @@ test('DATA_UPDATED broadcasts pass through a sensitive-field sanitizer', () => {
   assert.match(backgroundSource, /function broadcastDataUpdate\(payload\)[\s\S]*sanitizeDataUpdatePayload\(payload\)/);
   assert.match(backgroundSource, /if \(!Object\.keys\(safePayload\)\.length\) \{[\s\S]*return;[\s\S]*\}/);
 
-  for (const key of ['password', 'oauthUrl', 'localhostUrl', 'tmailorAccessToken']) {
+  for (const key of ['password', 'oauthUrl', 'localhostUrl', 'tmailorAccessToken', 'cloudMailAdminPassword']) {
     assert.doesNotMatch(
       backgroundSource,
       new RegExp(`broadcastDataUpdate\\(\\{\\s*${key}\\b`),
