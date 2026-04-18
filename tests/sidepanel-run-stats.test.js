@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  buildTargetMailboxTimerHtml,
   buildRunStatsDetailsHtml,
   buildRunFailureSummaryHtml,
   buildRunSuccessDetailsHtml,
@@ -195,4 +196,17 @@ test('formatRunStatsAverageDuration returns a placeholder when there is no succe
 test('buildRunSuccessDetailsHtml renders an empty state when there are no successful runs yet', () => {
   const html = buildRunSuccessDetailsHtml({ recentSuccessDurationsMs: [] });
   assert.match(html, /暂无成功记录/);
+});
+
+test('buildTargetMailboxTimerHtml renders elapsed time since the last acquired target mailbox', () => {
+  const html = buildTargetMailboxTimerHtml(1710000000000, { now: 1710000065000 });
+
+  assert.match(html, /距上次刷到目标邮箱：01:05/);
+  assert.match(html, /run-stat-text failure-meta/);
+});
+
+test('buildTargetMailboxTimerHtml renders a placeholder when no target mailbox time is available', () => {
+  const html = buildTargetMailboxTimerHtml(null, { now: 1710000065000 });
+
+  assert.match(html, /距上次刷到目标邮箱：--/);
 });

@@ -1,6 +1,6 @@
 // background.js — Service Worker: orchestration, state, tab management, message routing
 
-importScripts('shared/email-addresses.js', 'shared/mail-provider-rotation.js', 'shared/mail-matching.js', 'shared/mail-freshness.js', 'shared/latest-mail.js', 'shared/tmailor-domains.js', 'shared/tmailor-api.js', 'shared/cloudmail-api.js', 'shared/codex2api-oauth.js', 'shared/tmailor-errors.js', 'shared/tmailor-mailbox-strategy.js', 'shared/tmailor-verification-profiles.js', 'shared/flow-recovery.js', 'shared/content-script-queue.js', 'shared/login-verification-codes.js', 'shared/fingerprint-bridge-client.js', 'data/names.js', 'shared/flow-runner.js', 'shared/runtime-errors.js', 'shared/auto-run.js', 'shared/auto-run-failure-stats.js', 'shared/duck-mail-errors.js', 'shared/sidepanel-settings.js', 'shared/tab-reclaim.js');
+importScripts('shared/email-addresses.js', 'shared/mail-provider-rotation.js', 'shared/mail-matching.js', 'shared/mail-freshness.js', 'shared/latest-mail.js', 'shared/tmailor-domains.js', 'shared/tmailor-api.js', 'shared/cloudmail-api.js', 'shared/codex2api-oauth.js', 'shared/tmailor-errors.js', 'shared/tmailor-mailbox-strategy.js', 'shared/tmailor-verification-profiles.js', 'shared/flow-recovery.js', 'shared/content-script-queue.js', 'shared/login-verification-codes.js', 'shared/fingerprint-bridge-client.js', 'data/names.js', 'shared/flow-runner.js', 'shared/runtime-errors.js', 'shared/auto-run.js', 'shared/auto-run-failure-stats.js', 'shared/duck-mail-errors.js', 'shared/sidepanel-settings.js', 'shared/tab-reclaim.js', 'shared/account-records.js');
 
 const LOG_PREFIX = '[Infinitoai:bg]';
 const DUCK_AUTOFILL_URL = 'https://duckduckgo.com/email/settings/autofill';
@@ -13,6 +13,8 @@ const HUMAN_STEP_DELAY_MAX = 2200;
 const TMAILOR_API_CAPTCHA_COOLDOWN_MS = 3 * 60 * 1000;
 const MAX_LOG_ENTRIES_PER_ROUND = 500;
 const MAX_LOG_ROUNDS = 3;
+const STEP5_MAX_PROFILE_RETRY_ATTEMPTS = 2;
+const STEP6_MAX_OAUTH_RETRY_ATTEMPTS = 10;
 const { getStepDelayAfter, runStepSequence } = FlowRunner;
 const {
   buildMailPollRecoveryPlan,
@@ -21,6 +23,7 @@ const {
   shouldRetryStep1WithFreshVpsPanel,
   shouldRetryStep3WithPlatformLoginRefresh,
   shouldRetryStep3WithFreshOauth,
+  shouldRetryStep5WithProfileRefresh,
   shouldRetryStep6WithFreshOauth,
   shouldRetryStep7Through9FromStep6,
   shouldRetryStep8WithFreshOauth,
@@ -33,11 +36,14 @@ const {
   buildAutoRunStatusPayload,
   buildAutoRunFailureRecord,
   formatAutoRunLabel,
+  getAutoRunActiveWatchdogAlarmName,
   getAutoRunPauseWatchdogAlarmName,
   getAutoRunPauseWatchdogDeadline,
+  getAutoRunWatchdogLastLogEntry,
   isAutoRunLogSilenceError,
   shouldContinueAutoRunAfterWatchdog,
   shouldContinueAutoRunAfterError,
+  shouldRearmPersistentAutoRunWatchdogFromLog,
   shouldUsePersistentAutoRunPauseWatchdog,
   shouldStartNextInfiniteRunAfterManualFlow,
   shouldSuspendAutoRunWatchdogDuringPause,
@@ -53,6 +59,12 @@ const { addDuckMailRetryHint } = DuckMailErrors;
 const { isTmailorApiCaptchaError } = TmailorErrors;
 const { getTmailorApiOnlyPollingMessage, shouldUseTmailorApiMailboxOnly } = TmailorMailboxStrategy;
 const { buildManualTmailorCodeFetchConfig, getTmailorVerificationProfile } = TmailorVerificationProfiles;
+const {
+  createAccountRecord,
+  normalizeAccountRecords,
+  patchAccountRecord,
+  updateAccountRecordStatus,
+} = AccountRecords;
 const {
   buildContentScriptResponseTimeoutError,
   getContentScriptQueueTimeout,
@@ -314,7 +326,10 @@ const DEFAULT_STATE = {
   email: null,
   password: null,
   accounts: [], // { email, password, createdAt }
+  accountRecords: [],
+  currentAccountRecordId: null,
   lastEmailTimestamp: null,
+  lastTargetEmailAcquiredAt: null,
   lastSignupVerificationCode: '',
   localhostUrl: null,
   existingAccountLogin: false,
@@ -366,6 +381,7 @@ const DEFAULT_STATE = {
     message: 'TMailor API not checked yet.',
   },
   emailLease: null,
+  autoRunActiveWatchdog: null,
   autoRunPauseWatchdog: null,
   mailProviderUsage: {
     '163': [],
@@ -375,6 +391,7 @@ const DEFAULT_STATE = {
 
 const TMAILOR_DOMAIN_STATE_KEY = 'tmailorDomainState';
 const AUTO_RUN_STATS_KEY = 'autoRunStats';
+const ACCOUNT_RECORDS_KEY = 'accountRecords';
 const AUTO_RUN_LOG_SILENCE_TIMEOUT_MS = DEFAULT_AUTO_RUN_LOG_SILENCE_TIMEOUT_MS;
 let cachedTmailorDomainSeeds = null;
 let autoRunStatsLoaded = false;
@@ -410,13 +427,14 @@ async function loadPersistentTmailorDomainSeeds() {
 }
 
 async function getState() {
-  const [sessionState, persistentSettings, tmailorDomainState, autoRunStats] = await Promise.all([
+  const [sessionState, persistentSettings, tmailorDomainState, autoRunStats, accountRecords] = await Promise.all([
     chrome.storage.session.get(null),
     getPersistentSettings(),
     getPersistentTmailorDomainState(),
     getPersistentAutoRunStats(),
+    getPersistentAccountRecords(),
   ]);
-  return { ...DEFAULT_STATE, ...sessionState, ...persistentSettings, tmailorDomainState, autoRunStats };
+  return { ...DEFAULT_STATE, ...sessionState, ...persistentSettings, tmailorDomainState, autoRunStats, accountRecords };
 }
 
 function sanitizeRuntimeState(state = {}) {
@@ -434,6 +452,45 @@ function isTrustedSidePanelRequest(message, sender) {
 async function setState(updates) {
   console.log(LOG_PREFIX, 'storage.set keys:', Object.keys(updates || {}).join(','));
   await chrome.storage.session.set(updates);
+}
+
+async function getPersistentAccountRecords() {
+  const [localState, sessionState] = await Promise.all([
+    chrome.storage.local.get(ACCOUNT_RECORDS_KEY),
+    chrome.storage.session.get(ACCOUNT_RECORDS_KEY),
+  ]);
+
+  const localStored = localState[ACCOUNT_RECORDS_KEY];
+  const sessionStored = sessionState[ACCOUNT_RECORDS_KEY];
+  const mergedRecords = normalizeAccountRecords(
+    localStored !== undefined
+      ? localStored
+      : (sessionStored !== undefined ? sessionStored : DEFAULT_STATE.accountRecords)
+  );
+
+  const localStoredJson = JSON.stringify(localStored || null);
+  const sessionStoredJson = JSON.stringify(sessionStored || null);
+  const mergedJson = JSON.stringify(mergedRecords);
+
+  if (localStored === undefined && sessionStored !== undefined) {
+    await chrome.storage.local.set({ [ACCOUNT_RECORDS_KEY]: mergedRecords });
+  } else if (localStoredJson !== mergedJson || sessionStoredJson !== mergedJson) {
+    await Promise.all([
+      chrome.storage.local.set({ [ACCOUNT_RECORDS_KEY]: mergedRecords }),
+      chrome.storage.session.set({ [ACCOUNT_RECORDS_KEY]: mergedRecords }),
+    ]);
+  }
+
+  return mergedRecords;
+}
+
+async function setPersistentAccountRecords(nextRecords) {
+  const normalizedRecords = normalizeAccountRecords(nextRecords);
+  await Promise.all([
+    chrome.storage.local.set({ [ACCOUNT_RECORDS_KEY]: normalizedRecords }),
+    chrome.storage.session.set({ [ACCOUNT_RECORDS_KEY]: normalizedRecords }),
+  ]);
+  return normalizedRecords;
 }
 
 async function getPersistentAutoRunStats() {
@@ -707,20 +764,31 @@ async function setMailProviderState(mailProvider) {
   return nextProvider;
 }
 
-async function setEmailState(email) {
-  await setState({ email, lastSignupVerificationCode: '' });
-  broadcastDataUpdate({ email });
+async function setEmailState(email, options = {}) {
+  const trimmedEmail = String(email || '').trim();
+  const currentState = trimmedEmail ? null : await getState();
+  const nextTargetEmailAcquiredAt = trimmedEmail
+    ? (Number.isFinite(options.lastTargetEmailAcquiredAt) ? options.lastTargetEmailAcquiredAt : Date.now())
+    : (Number.isFinite(currentState?.lastTargetEmailAcquiredAt) ? currentState.lastTargetEmailAcquiredAt : null);
+  await setState({
+    email,
+    lastSignupVerificationCode: '',
+    lastTargetEmailAcquiredAt: nextTargetEmailAcquiredAt,
+  });
+  broadcastDataUpdate({ email, lastTargetEmailAcquiredAt: nextTargetEmailAcquiredAt });
 }
 
 async function setTmailorMailboxState(email, accessToken) {
+  const nextTargetEmailAcquiredAt = Date.now();
   await setState({
     email,
     tmailorAccessToken: String(accessToken || '').trim(),
     tmailorApiCaptchaCooldownUntil: 0,
     tmailorOutcomeRecorded: false,
     lastSignupVerificationCode: '',
+    lastTargetEmailAcquiredAt: nextTargetEmailAcquiredAt,
   });
-  broadcastDataUpdate({ email });
+  broadcastDataUpdate({ email, lastTargetEmailAcquiredAt: nextTargetEmailAcquiredAt });
 }
 
 async function setTmailorDomainState(nextState) {
@@ -745,6 +813,83 @@ async function setPasswordState(password) {
   broadcastTrustedStateUpdated();
 }
 
+function findAccountRecordIndex(records, recordId) {
+  if (!recordId) {
+    return -1;
+  }
+  return records.findIndex((record) => record.id === recordId);
+}
+
+async function createOrReuseCurrentAccountRecord(payload = {}) {
+  const state = await getState();
+  const records = normalizeAccountRecords(state.accountRecords);
+  const email = String(payload.email || state.email || '').trim().toLowerCase();
+  const password = String(payload.password || state.password || '').trim();
+
+  if (!email || !password) {
+    return null;
+  }
+
+  const basePatch = {
+    email,
+    password,
+    emailSource: payload.emailSource || state.emailSource || '',
+    mailProvider: payload.mailProvider || state.mailProvider || '',
+    updatedAt: new Date().toISOString(),
+  };
+  const currentIndex = findAccountRecordIndex(records, state.currentAccountRecordId);
+  let nextRecords = records.slice();
+  let currentRecord = null;
+
+  if (
+    currentIndex >= 0
+    && records[currentIndex].status === 'pending'
+    && records[currentIndex].email === email
+    && records[currentIndex].password === password
+  ) {
+    currentRecord = patchAccountRecord(records[currentIndex], basePatch);
+    nextRecords[currentIndex] = currentRecord;
+  } else {
+    currentRecord = createAccountRecord({
+      ...basePatch,
+      status: 'pending',
+      statusDetail: '',
+    });
+    nextRecords.push(currentRecord);
+  }
+
+  nextRecords = await setPersistentAccountRecords(nextRecords);
+  await setState({ currentAccountRecordId: currentRecord.id });
+  broadcastDataUpdate({ accountRecords: nextRecords });
+  return currentRecord;
+}
+
+async function updateCurrentAccountRecord(updates = {}) {
+  const state = await getState();
+  const records = normalizeAccountRecords(state.accountRecords);
+  const currentIndex = findAccountRecordIndex(records, state.currentAccountRecordId);
+  if (currentIndex < 0) {
+    return null;
+  }
+
+  const nextRecord = updates.status !== undefined || updates.statusDetail !== undefined
+    ? updateAccountRecordStatus(records[currentIndex], updates)
+    : patchAccountRecord(records[currentIndex], updates);
+  const nextRecords = records.slice();
+  nextRecords[currentIndex] = nextRecord;
+  const normalizedRecords = await setPersistentAccountRecords(nextRecords);
+  broadcastDataUpdate({ accountRecords: normalizedRecords });
+  return nextRecord;
+}
+
+async function updateCurrentAccountRecordFromError(errorMessage) {
+  const detail = String(errorMessage || '').trim();
+  if (!detail) {
+    return null;
+  }
+  return await updateCurrentAccountRecord({ statusDetail: detail });
+}
+
 async function resetState(options = {}) {
   const { preserveLogHistory = false } = options;
   console.log(LOG_PREFIX, 'Resetting all state');
@@ -762,9 +907,9 @@ async function resetState(options = {}) {
       'mailProviderUsage',
       'customPassword',
     ]),
-    Promise.all([getPersistentSettings(), getPersistentTmailorDomainState(), getPersistentAutoRunStats()]),
+    Promise.all([getPersistentSettings(), getPersistentTmailorDomainState(), getPersistentAutoRunStats(), getPersistentAccountRecords()]),
   ]);
-  const [persistentSettings, tmailorDomainState, autoRunStats] = persistentBundle;
+  const [persistentSettings, tmailorDomainState, autoRunStats, accountRecords] = persistentBundle;
   const logHistoryState = preserveLogHistory
     ? getNormalizedLogHistory(prev)
     : buildInitialLogState();
@@ -777,6 +922,8 @@ async function resetState(options = {}) {
     seenCodes: prev.seenCodes || [],
     seenInbucketMailIds: prev.seenInbucketMailIds || [],
     accounts: prev.accounts || [],
+    accountRecords,
+    currentAccountRecordId: null,
     tabRegistry: prev.tabRegistry || {},
     autoRunStats,
     tmailorOutcomeRecorded: false,
@@ -1719,13 +1866,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 if (chrome.alarms?.onAlarm) {
   chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm?.name !== getAutoRunPauseWatchdogAlarmName()) {
+    if (alarm?.name === getAutoRunPauseWatchdogAlarmName()) {
+      handlePersistentAutoRunPauseWatchdogAlarm().catch((err) => {
+        console.error(LOG_PREFIX, 'Persistent auto-run pause watchdog failed:', err);
+      });
       return;
     }
 
-    handlePersistentAutoRunPauseWatchdogAlarm().catch((err) => {
-      console.error(LOG_PREFIX, 'Persistent auto-run pause watchdog failed:', err);
-    });
+    if (alarm?.name === getAutoRunActiveWatchdogAlarmName()) {
+      handlePersistentActiveAutoRunWatchdogAlarm().catch((err) => {
+        console.error(LOG_PREFIX, 'Persistent auto-run active watchdog failed:', err);
+      });
+    }
   });
 }
 
@@ -1762,7 +1914,41 @@ async function handlePersistentAutoRunPauseWatchdogAlarm() {
     return;
   }
 
-  await finalizePersistentAutoRunPauseWatchdogTimeout(error, state, context, lastLogEntry);
+  await finalizePersistentAutoRunWatchdogTimeout(error, state, context, lastLogEntry);
+}
+
+async function handlePersistentActiveAutoRunWatchdogAlarm() {
+  const state = await getState();
+  const context = getNormalizedAutoRunPauseWatchdogContext(state.autoRunActiveWatchdog);
+  if (!context || context.phase !== 'running') {
+    await clearPersistentAutoRunActiveWatchdog();
+    return;
+  }
+
+  if (!state.autoRunning) {
+    await clearPersistentAutoRunActiveWatchdog();
+    return;
+  }
+
+  if (context.deadlineAt > Date.now() + 250) {
+    if (chrome.alarms?.create) {
+      await chrome.alarms.create(getAutoRunActiveWatchdogAlarmName(), { when: context.deadlineAt });
+    }
+    return;
+  }
+
+  const { error, lastLogEntry } = buildPausedAutoRunWatchdogError(state, context);
+
+  await clearPersistentAutoRunActiveWatchdog();
+  if (autoRunWatchdogReject) {
+    autoRunWatchdogTriggered = true;
+    clearAutoRunWatchdogTimer();
+    autoRunWatchdogReject(error);
+    autoRunWatchdogReject = null;
+    return;
+  }
+
+  await finalizePersistentAutoRunWatchdogTimeout(error, state, context, lastLogEntry);
 }
 
 async function handleMessage(message, sender) {
@@ -1787,6 +1973,7 @@ async function handleMessage(message, sender) {
       const currentState = await getState();
       const currentStepStatus = currentState?.stepStatuses?.[message.step];
       if (currentStepStatus === 'completed') {
+        notifyStepComplete(message.step, message.payload);
         return { ok: true };
       }
       if (stopRequested) {
@@ -1803,6 +1990,7 @@ async function handleMessage(message, sender) {
         const displayedError = decorateAuthFailureWithEmailDomain(err.message, latestState?.email);
         await setStepStatus(message.step, 'failed');
         await addLog(`第 ${message.step} 步失败：${displayedError}`, 'error');
+        await updateCurrentAccountRecordFromError(displayedError);
         await recordTmailorOutcome('failure', { step: message.step, errorMessage: displayedError });
         notifyStepError(message.step, displayedError);
         return { ok: false, error: displayedError };
@@ -1824,6 +2012,7 @@ async function handleMessage(message, sender) {
         const displayedError = decorateAuthFailureWithEmailDomain(message.error, currentState?.email);
         await setStepStatus(message.step, 'failed');
         await addLog(`第 ${message.step} 步失败：${displayedError}`, 'error');
+        await updateCurrentAccountRecordFromError(displayedError);
         await recordTmailorOutcome('failure', { step: message.step, errorMessage: displayedError });
         notifyStepError(message.step, displayedError);
       }
@@ -1866,6 +2055,13 @@ async function handleMessage(message, sender) {
         ok: true,
         ...nextState,
       };
+    }
+
+    case 'CLEAR_ACCOUNT_RECORDS': {
+      await setPersistentAccountRecords([]);
+      await setState({ currentAccountRecordId: null });
+      broadcastDataUpdate({ accountRecords: [] });
+      return { ok: true };
     }
 
     case 'EXECUTE_STEP': {
@@ -2091,6 +2287,19 @@ async function handleMessage(message, sender) {
       return { ok: true };
     }
 
+    case 'TMAILOR_CLOSE_POPUP_AD_TAB': {
+      const senderTabId = sender.tab?.id;
+      const windowId = sender.tab?.windowId;
+      if (!Number.isFinite(senderTabId) || !Number.isFinite(windowId)) {
+        return { ok: true, popupClosed: false, closedTabIds: [], closedUrls: [] };
+      }
+      const result = await closeTmailorPopupAdTabs(senderTabId, windowId);
+      return {
+        ok: true,
+        ...result,
+      };
+    }
+
     default:
       console.warn(LOG_PREFIX, `Unknown message type: ${message.type}`);
       return { error: `Unknown message type: ${message.type}` };
@@ -2112,6 +2321,9 @@ async function handleStepData(step, payload) {
     case 3:
       if (payload.email) await setEmailState(payload.email);
       await setState({ existingAccountLogin: Boolean(payload.existingAccountLogin) });
+      await createOrReuseCurrentAccountRecord({
+        email: payload.email,
+      });
       break;
     case 4:
       if (payload.emailTimestamp) await setState({ lastEmailTimestamp: payload.emailTimestamp });
@@ -2123,6 +2335,10 @@ async function handleStepData(step, payload) {
       }
       break;
     case 9:
+      await updateCurrentAccountRecord({
+        status: 'success',
+        statusDetail: '',
+      });
       await recordTmailorOutcome('success', { step });
       break;
   }
@@ -2505,6 +2721,39 @@ async function completeFingerprintBridgeStep(step, state, payload = {}, options 
   return response;
 }
 
+async function closeTmailorPopupAdTabs(senderTabId, windowId) {
+  if (!Number.isFinite(senderTabId) || !Number.isFinite(windowId)) {
+    return { popupClosed: false, closedTabIds: [], closedUrls: [] };
+  }
+
+  const tabs = await chrome.tabs.query({ windowId });
+  const popupTabs = tabs.filter((tab) => {
+    if (!Number.isFinite(tab?.id) || tab.id === senderTabId) {
+      return false;
+    }
+    if (tab.openerTabId !== senderTabId) {
+      return false;
+    }
+    return !/^https:\/\/tmailor\.com(?:\/|$)/i.test(String(tab.url || ''));
+  });
+
+  if (popupTabs.length === 0) {
+    return { popupClosed: false, closedTabIds: [], closedUrls: [] };
+  }
+
+  const closedTabIds = popupTabs.map((tab) => tab.id);
+  const closedUrls = popupTabs.map((tab) => String(tab.url || '')).filter(Boolean);
+  await chrome.tabs.remove(closedTabIds);
+  try {
+    await chrome.tabs.update(senderTabId, { active: true });
+  } catch {}
+  return {
+    popupClosed: true,
+    closedTabIds,
+    closedUrls,
+  };
+}
+
 // ============================================================
 // Step Execution
 // ============================================================
@@ -2567,8 +2816,9 @@ async function executeStepAndWait(step, delayAfter = 2000, recoveryState = false
   const recoveredStep2PlatformLogin = Boolean(recoveryState && recoveryState !== true && recoveryState.step2PlatformLogin);
   const recoveredStep4CredentialStall = Boolean(recoveryState && recoveryState !== true && recoveryState.step4CredentialStall);
   const recoveredStep3PlatformLoginRefreshCount = Math.max(0, Number.parseInt(String(recoveryState?.step3PlatformLoginRefreshCount ?? 0), 10) || 0);
-  const recoveredStep3Timeout = recoveryState === true || Boolean(recoveryState?.step3Timeout);
-  const recoveredStep6PlatformLogin = Boolean(recoveryState && recoveryState !== true && recoveryState.step6PlatformLogin);
+  const recoveredStep3TimeoutRetryCount = Math.max(0, Number.parseInt(String(recoveryState?.step3TimeoutRetryCount ?? 0), 10) || 0);
+  const recoveredStep5ProfileRetryCount = Math.max(0, Number.parseInt(String(recoveryState?.step5ProfileRetryCount ?? 0), 10) || 0);
+  const recoveredStep6OauthRetryCount = Math.max(0, Number.parseInt(String(recoveryState?.step6OauthRetryCount ?? 0), 10) || 0);
   const recoveredStep7Through9FromStep6 = Boolean(recoveryState && recoveryState !== true && recoveryState.step7Through9FromStep6);
   const recoveredStep8UnexpectedRedirect = Boolean(recoveryState && recoveryState !== true && recoveryState.step8UnexpectedRedirect);
   const completionPromise = waitForStepComplete(step, 120000);
@@ -2607,13 +2857,33 @@ async function executeStepAndWait(step, delayAfter = 2000, recoveryState = false
         step3PlatformLoginRefreshCount: recoveredStep3PlatformLoginRefreshCount + 1,
       });
     }
-    if (step === 3 && !recoveredStep3Timeout && shouldRetryStep3WithFreshOauth(err)) {
-      await recoverStep3PlatformLogin(err);
-      return await executeStepAndWait(step, delayAfter, { step3Timeout: true });
+    if (step === 3 && shouldRetryStep3WithFreshOauth(err)) {
+      await recoverStep3PlatformLogin(err, {
+        attempt: recoveredStep3TimeoutRetryCount + 1,
+        reason: 'oauth-timeout',
+      });
+      return await executeStepAndWait(step, delayAfter, {
+        step3TimeoutRetryCount: recoveredStep3TimeoutRetryCount + 1,
+      });
     }
-    if (step === 6 && !recoveredStep6PlatformLogin && shouldRetryStep6WithFreshOauth(err)) {
-      await recoverStep6PlatformLogin(err);
-      return await executeStepAndWait(step, delayAfter, { step6PlatformLogin: true });
+    if (step === 5 && recoveredStep5ProfileRetryCount < STEP5_MAX_PROFILE_RETRY_ATTEMPTS && shouldRetryStep5WithProfileRefresh(err)) {
+      await recoverStep5ProfilePage(err, {
+        attempt: recoveredStep5ProfileRetryCount + 1,
+        maxAttempts: STEP5_MAX_PROFILE_RETRY_ATTEMPTS,
+      });
+      return await executeStepAndWait(step, delayAfter, {
+        step5ProfileRetryCount: recoveredStep5ProfileRetryCount + 1,
+      });
+    }
+    if (step === 6 && recoveredStep6OauthRetryCount < STEP6_MAX_OAUTH_RETRY_ATTEMPTS && shouldRetryStep6WithFreshOauth(err)) {
+      await recoverStep6PlatformLogin(err, {
+        attempt: recoveredStep6OauthRetryCount + 1,
+        maxAttempts: STEP6_MAX_OAUTH_RETRY_ATTEMPTS,
+        reason: 'fresh-oauth',
+      });
+      return await executeStepAndWait(step, delayAfter, {
+        step6OauthRetryCount: recoveredStep6OauthRetryCount + 1,
+      });
     }
     if (step === 8 && !recoveredStep8UnexpectedRedirect && shouldRetryStep8WithFreshOauth(err)) {
       await replaySteps6Through8WithCurrentAccount(
@@ -2902,10 +3172,12 @@ function getTmailorOutcomeEmail(state) {
 }
 
 async function markTmailorOutcomePending(email) {
+  const nextTargetEmailAcquiredAt = String(email || '').trim() ? Date.now() : null;
   await setState({
     email,
     tmailorAccessToken: '',
     tmailorOutcomeRecorded: false,
+    lastTargetEmailAcquiredAt: nextTargetEmailAcquiredAt,
   });
   await setTmailorEmailLease({
     email,
@@ -2913,7 +3185,7 @@ async function markTmailorOutcomePending(email) {
     status: 'active',
     invalidReason: '',
   });
-  broadcastDataUpdate({ email });
+  broadcastDataUpdate({ email, lastTargetEmailAcquiredAt: nextTargetEmailAcquiredAt });
 }
 
 async function recordTmailorOutcome(result, context = {}) {
@@ -3149,6 +3421,7 @@ function getNormalizedAutoRunPauseWatchdogContext(value) {
     : Number.parseInt(String(value.totalRuns ?? '').trim(), 10);
   const normalizedTimeoutMs = Number.parseInt(String(value.timeoutMs ?? '').trim(), 10);
   const normalizedDeadlineAt = Number.parseInt(String(value.deadlineAt ?? '').trim(), 10);
+  const normalizedLastLogTimestamp = Number.parseInt(String(value.lastLogTimestamp ?? '').trim(), 10);
 
   return {
     phase: normalizedPhase,
@@ -3163,6 +3436,24 @@ function getNormalizedAutoRunPauseWatchdogContext(value) {
     deadlineAt: Number.isFinite(normalizedDeadlineAt) && normalizedDeadlineAt > 0
       ? normalizedDeadlineAt
       : 0,
+    lastLogMessage: typeof value.lastLogMessage === 'string' ? value.lastLogMessage : '',
+    lastLogLevel: typeof value.lastLogLevel === 'string' ? value.lastLogLevel : '',
+    lastLogTimestamp: Number.isFinite(normalizedLastLogTimestamp) && normalizedLastLogTimestamp > 0
+      ? normalizedLastLogTimestamp
+      : 0,
+  };
+}
+
+function normalizeAutoRunWatchdogLogEntry(entry = null) {
+  const message = String(entry?.message || '').trim();
+  if (!message) {
+    return null;
+  }
+
+  return {
+    message,
+    level: String(entry?.level || '').trim().toLowerCase() || 'info',
+    timestamp: Number.isFinite(entry?.timestamp) ? entry.timestamp : Date.now(),
   };
 }
 
@@ -3173,6 +3464,13 @@ async function clearPersistentAutoRunPauseWatchdog() {
   await setState({ autoRunPauseWatchdog: null });
 }
 
+async function clearPersistentAutoRunActiveWatchdog() {
+  if (chrome.alarms?.clear) {
+    await chrome.alarms.clear(getAutoRunActiveWatchdogAlarmName()).catch(() => {});
+  }
+  await setState({ autoRunActiveWatchdog: null });
+}
+
 async function armPersistentAutoRunPauseWatchdog(context = {}) {
   const timeoutMs = Number.isFinite(context.timeoutMs) && context.timeoutMs > 0
     ? context.timeoutMs
@@ -3181,6 +3479,10 @@ async function armPersistentAutoRunPauseWatchdog(context = {}) {
     timeoutMs,
     now: Date.now(),
   });
+  const lastLogEntry = getAutoRunWatchdogLastLogEntry(
+    context,
+    normalizeAutoRunWatchdogLogEntry(context.lastLogEntry) || autoRunWatchdogLastLogEntry || null
+  );
   const nextContext = {
     phase: String(context.phase || '').trim().toLowerCase(),
     currentRun: Number.parseInt(String(context.currentRun ?? '').trim(), 10) || 0,
@@ -3191,10 +3493,50 @@ async function armPersistentAutoRunPauseWatchdog(context = {}) {
     timeoutMs,
     deadlineAt,
   };
+  if (lastLogEntry) {
+    nextContext.lastLogMessage = lastLogEntry.message;
+    nextContext.lastLogLevel = lastLogEntry.level;
+    nextContext.lastLogTimestamp = lastLogEntry.timestamp;
+  }
 
   await setState({ autoRunPauseWatchdog: nextContext });
   if (chrome.alarms?.create) {
     await chrome.alarms.create(getAutoRunPauseWatchdogAlarmName(), { when: deadlineAt });
+  }
+  return nextContext;
+}
+
+async function armPersistentAutoRunActiveWatchdog(context = {}) {
+  const timeoutMs = Number.isFinite(context.timeoutMs) && context.timeoutMs > 0
+    ? context.timeoutMs
+    : AUTO_RUN_LOG_SILENCE_TIMEOUT_MS;
+  const deadlineAt = getAutoRunPauseWatchdogDeadline({
+    timeoutMs,
+    now: Date.now(),
+  });
+  const lastLogEntry = getAutoRunWatchdogLastLogEntry(
+    context,
+    normalizeAutoRunWatchdogLogEntry(context.lastLogEntry) || autoRunWatchdogLastLogEntry || null
+  );
+  const nextContext = {
+    phase: 'running',
+    currentRun: Number.parseInt(String(context.currentRun ?? '').trim(), 10) || 0,
+    totalRuns: context.infiniteMode
+      ? 0
+      : (Number.parseInt(String(context.totalRuns ?? '').trim(), 10) || 0),
+    infiniteMode: Boolean(context.infiniteMode),
+    timeoutMs,
+    deadlineAt,
+  };
+  if (lastLogEntry) {
+    nextContext.lastLogMessage = lastLogEntry.message;
+    nextContext.lastLogLevel = lastLogEntry.level;
+    nextContext.lastLogTimestamp = lastLogEntry.timestamp;
+  }
+
+  await setState({ autoRunActiveWatchdog: nextContext });
+  if (chrome.alarms?.create) {
+    await chrome.alarms.create(getAutoRunActiveWatchdogAlarmName(), { when: deadlineAt });
   }
   return nextContext;
 }
@@ -3210,7 +3552,10 @@ function getLastVisibleAutoRunLogEntry(state = {}) {
 }
 
 function buildPausedAutoRunWatchdogError(state = {}, context = {}) {
-  const lastLogEntry = getLastVisibleAutoRunLogEntry(state) || autoRunWatchdogLastLogEntry || null;
+  const lastLogEntry = getAutoRunWatchdogLastLogEntry(
+    context,
+    getLastVisibleAutoRunLogEntry(state) || autoRunWatchdogLastLogEntry || null
+  );
   return {
     lastLogEntry,
     error: new Error(buildAutoRunLogSilenceErrorMessage({
@@ -3223,7 +3568,8 @@ function buildPausedAutoRunWatchdogError(state = {}, context = {}) {
   };
 }
 
-async function finalizePersistentAutoRunPauseWatchdogTimeout(error, state = {}, context = {}, lastLogEntry = null) {
+async function finalizePersistentAutoRunWatchdogTimeout(error, state = {}, context = {}, lastLogEntry = null) {
+  await clearPersistentAutoRunActiveWatchdog();
   await clearPersistentAutoRunPauseWatchdog();
   resetAutoRunWatchdog({ preserveLastLog: true });
   cancelPendingCommands();
@@ -3296,6 +3642,7 @@ function clearAutoRunWatchdogTimer() {
 
 function resetAutoRunWatchdog({ preserveLastLog = false } = {}) {
   clearAutoRunWatchdogTimer();
+  void clearPersistentAutoRunActiveWatchdog().catch(() => {});
   autoRunWatchdogGeneration += 1;
   autoRunWatchdogPromise = null;
   autoRunWatchdogReject = null;
@@ -3357,6 +3704,12 @@ function startAutoRunWatchdog() {
   resetAutoRunWatchdog();
   ensureAutoRunWatchdogPromise();
   autoRunWatchdogLastActivityAt = Date.now();
+  void armPersistentAutoRunActiveWatchdog({
+    currentRun: autoRunCurrentRun,
+    totalRuns: autoRunTotalRuns,
+    infiniteMode: autoRunInfinite,
+    timeoutMs: AUTO_RUN_LOG_SILENCE_TIMEOUT_MS,
+  }).catch(() => {});
   scheduleAutoRunWatchdog();
 }
 
@@ -3367,6 +3720,7 @@ function suspendAutoRunWatchdog() {
 
   autoRunWatchdogSuspended = true;
   clearAutoRunWatchdogTimer();
+  void clearPersistentAutoRunActiveWatchdog().catch(() => {});
 }
 
 function resumeAutoRunWatchdog({ resetActivity = true } = {}) {
@@ -3378,24 +3732,60 @@ function resumeAutoRunWatchdog({ resetActivity = true } = {}) {
   if (resetActivity) {
     autoRunWatchdogLastActivityAt = Date.now();
   }
+  void armPersistentAutoRunActiveWatchdog({
+    currentRun: autoRunCurrentRun,
+    totalRuns: autoRunTotalRuns,
+    infiniteMode: autoRunInfinite,
+    timeoutMs: AUTO_RUN_LOG_SILENCE_TIMEOUT_MS,
+  }).catch(() => {});
   scheduleAutoRunWatchdog();
 }
 
-function touchAutoRunWatchdog(entry = null) {
-  if (!autoRunWatchdogPromise || autoRunWatchdogTriggered) {
+async function refreshPersistentAutoRunWatchdogFromState(entry = null) {
+  const lastLogEntry = normalizeAutoRunWatchdogLogEntry(entry) || autoRunWatchdogLastLogEntry || null;
+  const state = await getState();
+  const context = getNormalizedAutoRunPauseWatchdogContext(state.autoRunActiveWatchdog);
+  if (!shouldRearmPersistentAutoRunWatchdogFromLog({
+    hasInMemoryWatchdog: Boolean(autoRunWatchdogPromise),
+    watchdogTriggered: autoRunWatchdogTriggered,
+    watchdogSuspended: autoRunWatchdogSuspended,
+    autoRunning: Boolean(state.autoRunning),
+    persistentWatchdogPhase: context?.phase || '',
+  })) {
     return;
   }
 
-  autoRunWatchdogLastActivityAt = Number.isFinite(entry?.timestamp) ? entry.timestamp : Date.now();
-  if (entry && typeof entry.message === 'string' && entry.message.trim()) {
-    autoRunWatchdogLastLogEntry = {
-      message: entry.message,
-      level: entry.level || 'info',
-      timestamp: Number.isFinite(entry.timestamp) ? entry.timestamp : Date.now(),
-    };
+  await armPersistentAutoRunActiveWatchdog({
+    currentRun: context?.currentRun || autoRunCurrentRun,
+    totalRuns: context?.totalRuns || autoRunTotalRuns,
+    infiniteMode: context ? context.infiniteMode : autoRunInfinite,
+    timeoutMs: context?.timeoutMs || AUTO_RUN_LOG_SILENCE_TIMEOUT_MS,
+    lastLogEntry,
+  });
+}
+
+function touchAutoRunWatchdog(entry = null) {
+  const lastLogEntry = normalizeAutoRunWatchdogLogEntry(entry);
+  autoRunWatchdogLastActivityAt = lastLogEntry?.timestamp || Date.now();
+  if (lastLogEntry) {
+    autoRunWatchdogLastLogEntry = lastLogEntry;
+  }
+
+  if (!autoRunWatchdogPromise || autoRunWatchdogTriggered) {
+    if (!autoRunWatchdogSuspended) {
+      void refreshPersistentAutoRunWatchdogFromState(lastLogEntry).catch(() => {});
+    }
+    return;
   }
 
   if (!autoRunWatchdogSuspended) {
+    void armPersistentAutoRunActiveWatchdog({
+      currentRun: autoRunCurrentRun,
+      totalRuns: autoRunTotalRuns,
+      infiniteMode: autoRunInfinite,
+      timeoutMs: AUTO_RUN_LOG_SILENCE_TIMEOUT_MS,
+      lastLogEntry,
+    }).catch(() => {});
     scheduleAutoRunWatchdog();
   }
 }
@@ -3422,6 +3812,7 @@ async function recordVisibleAutoRunFailure(errorMessage, overrides = {}) {
     timestamp: overrides.timestamp ?? Date.now(),
   });
 
+  await updateCurrentAccountRecordFromError(failureRecord.errorMessage);
   await setAutoRunStats(recordAutoRunFailure(autoRunStatsState, failureRecord));
   return failureRecord;
 }
@@ -4124,6 +4515,12 @@ async function executeStep3(state) {
     accounts.push({ email, password, createdAt: new Date().toISOString() });
     await setState({ accounts });
   }
+  await createOrReuseCurrentAccountRecord({
+    email,
+    password,
+    emailSource,
+    mailProvider: state.mailProvider,
+  });
 
   await addLog(`第 3 步：正在填写邮箱 ${email}，点击 Continue，并请求一次性验证码...`);
   try {
@@ -4968,7 +5365,7 @@ async function waitForStep4VerificationAdvanceSignal(step, options = {}) {
       return null;
     }
 
-    const pageState = await getSignupAuthPageState().catch(() => null);
+    const pageState = await getSignupAuthPageStateForRecoveryMonitor();
     if (isStep4VerificationAdvanceState(pageState)) {
       if (shouldStop()) {
         return null;
@@ -5000,7 +5397,7 @@ async function waitForStep4SlowCodeFillRecovery(step, code, options = {}) {
     return null;
   }
 
-  const pageState = await getSignupAuthPageState().catch(() => null);
+  const pageState = await getSignupAuthPageStateForRecoveryMonitor();
   if (shouldStop()) {
     return null;
   }
@@ -5092,6 +5489,15 @@ async function getSignupPageFallbackAuthState() {
     hasReadyProfilePage: false,
     url: signupUrl,
   };
+}
+
+async function getSignupAuthPageStateForRecoveryMonitor() {
+  const fallbackState = await getSignupPageFallbackAuthState().catch(() => null);
+  if (fallbackState) {
+    return fallbackState;
+  }
+
+  return await getSignupAuthPageState().catch(() => null);
 }
 
 function isCanonicalAboutYouUrl(url = '') {
@@ -5406,6 +5812,24 @@ async function executeVerificationMailStep(step, state, options) {
       await setState({ lastSignupVerificationCode: result.code });
     }
 
+    if (submitResult?.accepted) {
+      const currentState = await getState();
+      if (currentState?.stepStatuses?.[step] !== 'completed') {
+        const backgroundCompletionPayload = {
+          backgroundVerifiedCompletion: true,
+          reason: submitResult.reason || '',
+          url: submitResult.url || '',
+        };
+        if (result.emailTimestamp) {
+          backgroundCompletionPayload.emailTimestamp = result.emailTimestamp;
+        }
+        await setStepStatus(step, 'completed');
+        await addLog(`第 ${step} 步已完成`, 'ok');
+        await handleStepData(step, backgroundCompletionPayload);
+        notifyStepComplete(step, backgroundCompletionPayload);
+      }
+    }
+
     return;
   }
 
@@ -5581,6 +6005,34 @@ async function executeStep5(state) {
   }
 }
 
+async function recoverStep5ProfilePage(error, options = {}) {
+  const message = error?.message || String(error || 'unknown step 5 error');
+  const attempt = Math.max(0, Number.parseInt(String(options?.attempt ?? 0), 10) || 0);
+  const maxAttempts = Math.max(attempt, Number.parseInt(String(options?.maxAttempts ?? 0), 10) || 0);
+  const retryLabel = attempt > 0 && maxAttempts > 0
+    ? ` (retry ${attempt}/${maxAttempts})`
+    : attempt > 0
+      ? ` (retry ${attempt})`
+      : '';
+  const signupTabId = await getTabId('signup-page');
+  if (!signupTabId) {
+    throw error;
+  }
+
+  const signupTab = await chrome.tabs.get(signupTabId).catch(() => null);
+  if (!signupTab?.url) {
+    throw error;
+  }
+
+  await addLog(
+    `Step 5: ${message} Reloading the current signup profile page and retrying step 5${retryLabel}...`,
+    'warn'
+  );
+  await reuseOrCreateTab('signup-page', signupTab.url, {
+    reloadIfSameUrl: true,
+  });
+}
+
 async function waitForStep5CompletionSignalOrRecoveredAuthState() {
   const timeoutMs = 15000;
   const start = Date.now();
@@ -5702,11 +6154,19 @@ async function recoverStep3PlatformLogin(error, options = {}) {
   await waitForSignupPage;
 }
 
-async function recoverStep6PlatformLogin(error) {
+async function recoverStep6PlatformLogin(error, options = {}) {
   const state = await getState();
   const message = error?.message || String(error || 'unknown step 6 error');
+  const attempt = Math.max(0, Number.parseInt(String(options?.attempt ?? 0), 10) || 0);
+  const maxAttempts = Math.max(attempt, Number.parseInt(String(options?.maxAttempts ?? 0), 10) || 0);
+  const retryLabel = attempt > 0 && maxAttempts > 0
+    ? ` (retry ${attempt}/${maxAttempts})`
+    : attempt > 0
+      ? ` (retry ${attempt})`
+      : '';
+  const refreshCopy = 'Refreshing the VPS OAuth link and reopening the auth login page';
   await addLog(
-    `Step 6: ${message} Refreshing the OAuth link and reopening the auth login page once with the current email/password...`,
+    `Step 6: ${message} ${refreshCopy}${retryLabel} with the current email/password...`,
     'warn'
   );
 
@@ -5746,6 +6206,8 @@ async function executeStep6(state) {
     throw new Error('No OAuth URL is available for login. Refresh the VPS OAuth link and retry step 6.');
   }
 
+  const effectivePassword = effectiveState.customPassword || effectiveState.password || '';
+
   await addLog(`Step 6: Opening OAuth URL for login...`);
   // Reuse the signup-page tab — navigate it to the OAuth URL
   await reuseOrCreateTab('signup-page', effectiveState.oauthUrl, {
@@ -5759,7 +6221,7 @@ async function executeStep6(state) {
       type: 'EXECUTE_STEP',
       step: 6,
       source: 'background',
-      payload: { email: effectiveState.email, password: effectiveState.password },
+      payload: { email: effectiveState.email, password: effectivePassword },
     });
   } catch (err) {
     const errorMessage = err?.message || String(err || '');

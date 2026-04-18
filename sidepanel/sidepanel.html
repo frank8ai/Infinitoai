@@ -44,6 +44,12 @@
     </div>
   </header>
 
+  <nav class="panel-tabs" aria-label="Side panel views">
+    <button id="btn-view-console" class="panel-tab active" type="button" aria-pressed="true">控制台</button>
+    <button id="btn-view-accounts" class="panel-tab" type="button" aria-pressed="false">账号</button>
+  </nav>
+
+  <div id="console-view" class="panel-view panel-view-active">
   <section id="data-section">
     <div class="data-card">
       <div class="data-row data-row-stats data-row-lead-label">
@@ -65,10 +71,13 @@
             </summary>
             <div id="run-failure-details" class="run-failure-details">暂无失败记录</div>
           </details>
+          <div class="run-target-email-timer" id="run-target-email-timer">
+            <span class="run-stat-text failure-meta">距上次刷到目标邮箱：--</span>
+          </div>
         </div>
       </div>
       <div class="data-row" id="row-vps">
-        <span class="data-label">VPS</span>
+        <span class="data-label">CPA OAuth</span>
         <div class="data-inline">
           <input type="password" id="input-vps-url" class="data-input" placeholder="http://ip:port/management.html#/oauth" />
           <div class="input-action-group">
@@ -475,9 +484,45 @@
       </button>
     </div>
   </section>
+  </div>
+
+  <section id="accounts-view" class="panel-view" hidden>
+    <div class="accounts-card">
+      <div class="accounts-header">
+        <span class="section-label">Accounts</span>
+        <div class="accounts-actions">
+          <label class="setting-toggle accounts-filter-toggle" for="input-accounts-success-only">
+            <input type="checkbox" id="input-accounts-success-only" />
+            <span>保留成功项</span>
+          </label>
+          <button id="btn-clear-account-records" class="btn btn-ghost btn-xs" type="button">清空</button>
+          <button id="btn-export-accounts-csv" class="btn btn-ghost btn-xs" type="button">导出 CSV</button>
+        </div>
+      </div>
+      <div class="accounts-table-wrap">
+        <table class="accounts-table">
+          <thead>
+            <tr>
+              <th>注册时间</th>
+              <th>Source</th>
+              <th>Mail</th>
+              <th>邮箱</th>
+              <th>密码</th>
+              <th>结果</th>
+              <th>原始日志</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-account-records">
+            <tr><td class="empty" colspan="7">暂无账号记录</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
 
   <div id="toast-container"></div>
   <script src="../shared/email-addresses.js"></script>
+  <script src="../shared/account-records.js"></script>
   <script src="../shared/manual-step-controls.js"></script>
   <script src="../shared/sidepanel-log-copy.js"></script>
   <script src="../shared/sidepanel-log-scroll.js"></script>

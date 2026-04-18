@@ -49,6 +49,9 @@
   }
 
   function getAuthOperationTimedOutMessage(step) {
+    if (Number(step) === 6) {
+      return 'Step 6 recoverable: OpenAI auth page timed out before login could complete. Refresh the VPS OAuth link and retry with the same email and password.';
+    }
     return `Step ${step} blocked: OpenAI auth page timed out before credentials could be submitted. Reopen the platform login page and retry with the same email and password.`;
   }
 

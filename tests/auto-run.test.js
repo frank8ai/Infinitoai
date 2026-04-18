@@ -7,10 +7,13 @@ const {
   buildAutoRunStatusPayload,
   buildAutoRunFailureRecord,
   formatAutoRunLabel,
+  getAutoRunWatchdogLastLogEntry,
+  getAutoRunActiveWatchdogAlarmName,
   getAutoRunPauseWatchdogAlarmName,
   getAutoRunPauseWatchdogDeadline,
   shouldContinueAutoRunAfterWatchdog,
   shouldStartNextInfiniteRunAfterManualFlow,
+  shouldRearmPersistentAutoRunWatchdogFromLog,
   shouldUsePersistentAutoRunPauseWatchdog,
   shouldSuspendAutoRunWatchdogDuringPause,
   shouldContinueAutoRunAfterError,
@@ -104,6 +107,10 @@ test('infinite email handoff pauses use a persistent watchdog alarm', () => {
   assert.equal(
     getAutoRunPauseWatchdogAlarmName(),
     'infinitoai-auto-run-paused-watchdog'
+  );
+  assert.equal(
+    getAutoRunActiveWatchdogAlarmName(),
+    'infinitoai-auto-run-active-watchdog'
   );
   assert.equal(
     getAutoRunPauseWatchdogDeadline({
@@ -484,6 +491,61 @@ test('buildAutoRunFailureRecord keeps the failure reason stable and appends the 
       timestamp: 456789,
       lastLogMessage: 'Step 8: Debugger click dispatched, waiting for redirect...',
       lastLogLevel: 'info',
+    }
+  );
+});
+
+test('persistent watchdog refreshes on new logs even after the in-memory watchdog promise is gone', () => {
+  assert.equal(
+    shouldRearmPersistentAutoRunWatchdogFromLog({
+      hasInMemoryWatchdog: false,
+      watchdogTriggered: false,
+      watchdogSuspended: false,
+      autoRunning: true,
+      persistentWatchdogPhase: 'running',
+    }),
+    true
+  );
+  assert.equal(
+    shouldRearmPersistentAutoRunWatchdogFromLog({
+      hasInMemoryWatchdog: false,
+      watchdogTriggered: false,
+      watchdogSuspended: false,
+      autoRunning: false,
+      persistentWatchdogPhase: 'running',
+    }),
+    false
+  );
+  assert.equal(
+    shouldRearmPersistentAutoRunWatchdogFromLog({
+      hasInMemoryWatchdog: true,
+      watchdogTriggered: false,
+      watchdogSuspended: false,
+      autoRunning: false,
+      persistentWatchdogPhase: '',
+    }),
+    true
+  );
+});
+
+test('persistent watchdog timeout keeps the frozen last-log snapshot from the alarm context', () => {
+  assert.deepEqual(
+    getAutoRunWatchdogLastLogEntry(
+      {
+        lastLogMessage: 'Step 6: Waiting for inbox polling...',
+        lastLogLevel: 'info',
+        lastLogTimestamp: 1710000000000,
+      },
+      {
+        message: 'Step 7: A newer log should not replace the timed-out snapshot.',
+        level: 'warn',
+        timestamp: 1710000015000,
+      }
+    ),
+    {
+      message: 'Step 6: Waiting for inbox polling...',
+      level: 'info',
+      timestamp: 1710000000000,
     }
   );
 });

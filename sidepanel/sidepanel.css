@@ -439,6 +439,20 @@ header {
   color: var(--red);
 }
 
+.run-stat-text.failure-meta {
+  color: var(--text-secondary);
+}
+
+.run-target-email-timer {
+  display: flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-base) 90%, var(--red-soft) 10%);
+}
+
 .run-failure-details {
   display: flex;
   flex-direction: column;
@@ -1382,7 +1396,7 @@ header {
 
 .toast {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   padding: 10px 14px;
   border-radius: var(--radius-md);
@@ -1506,4 +1520,228 @@ header {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.panel-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 14px;
+}
+
+.panel-tab {
+  flex: 1;
+  border: 1px solid var(--border-color, rgba(148, 163, 184, 0.24));
+  background: var(--panel-bg, rgba(255, 255, 255, 0.82));
+  color: inherit;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.panel-tab.active {
+  background: rgba(37, 99, 235, 0.12);
+  border-color: rgba(37, 99, 235, 0.34);
+  color: #1d4ed8;
+}
+
+[data-theme="dark"] .panel-tab {
+  background: rgba(15, 23, 42, 0.78);
+  border-color: rgba(71, 85, 105, 0.42);
+}
+
+[data-theme="dark"] .panel-tab.active {
+  color: #93c5fd;
+  background: rgba(37, 99, 235, 0.2);
+  border-color: rgba(59, 130, 246, 0.38);
+}
+
+.panel-view[hidden] {
+  display: none !important;
+}
+
+.accounts-card {
+  border: 1px solid var(--border-color, rgba(148, 163, 184, 0.24));
+  background: var(--panel-bg, rgba(255, 255, 255, 0.82));
+  border-radius: 18px;
+  padding: 14px;
+}
+
+[data-theme="dark"] .accounts-card {
+  border-color: rgba(71, 85, 105, 0.42);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(17, 24, 39, 0.94));
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.26);
+}
+
+.accounts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.accounts-header .section-label {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.accounts-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.accounts-actions .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.accounts-filter-toggle {
+  white-space: nowrap;
+}
+
+.accounts-table-wrap {
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+}
+
+[data-theme="dark"] .accounts-table-wrap {
+  border-color: rgba(71, 85, 105, 0.42);
+  background: rgba(2, 6, 23, 0.46);
+}
+
+.accounts-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.accounts-table th,
+.accounts-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+  text-align: left;
+  vertical-align: top;
+}
+
+.accounts-table th {
+  position: sticky;
+  top: 0;
+  background: rgba(248, 250, 252, 0.96);
+  z-index: 1;
+  white-space: nowrap;
+}
+
+[data-theme="dark"] .accounts-table th {
+  background: rgba(15, 23, 42, 0.96);
+  color: #e2e8f0;
+}
+
+.accounts-table td {
+  word-break: break-word;
+}
+
+.account-cell {
+  min-width: 0;
+}
+
+.account-cell[data-copy-value] {
+  cursor: copy;
+}
+
+.account-cell-meta {
+  white-space: nowrap;
+  width: 1%;
+}
+
+.account-cell-email,
+.account-cell-password {
+  white-space: nowrap;
+  width: 1%;
+  min-width: 160px;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-cell-raw {
+  width: 1%;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+[data-theme="dark"] .accounts-table td {
+  color: #cbd5e1;
+  border-bottom-color: rgba(71, 85, 105, 0.34);
+}
+
+.accounts-table td.empty {
+  text-align: center;
+  opacity: 0.7;
+}
+
+[data-theme="dark"] .accounts-table td.empty {
+  color: #94a3b8;
+  opacity: 1;
+}
+
+.account-status-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-weight: 600;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.account-status-success {
+  background: rgba(34, 197, 94, 0.14);
+  color: #15803d;
+}
+
+[data-theme="dark"] .account-status-success {
+  background: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+}
+
+.account-status-add-phone {
+  background: rgba(245, 158, 11, 0.16);
+  color: #b45309;
+}
+
+[data-theme="dark"] .account-status-add-phone {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fcd34d;
+}
+
+.account-status-other {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+[data-theme="dark"] .account-status-other {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
+
+.account-status-pending {
+  background: rgba(59, 130, 246, 0.12);
+  color: #1d4ed8;
+}
+
+[data-theme="dark"] .account-status-pending {
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
 }

@@ -42,6 +42,20 @@
     return `${pad(minutes)}:${pad(seconds)}`;
   }
 
+  function formatElapsedDuration(durationMs) {
+    const normalizedDurationMs = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 0;
+    const totalSeconds = Math.max(0, Math.floor(normalizedDurationMs / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    const pad = (value) => String(value).padStart(2, '0');
+
+    if (hours > 0) {
+      return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+    }
+    return `${pad(minutes)}:${pad(seconds)}`;
+  }
+
   function buildRunStatsSummaryHtml(stats = {}) {
     const normalizedStats = normalizeAutoRunStats(stats);
     return `
@@ -58,6 +72,18 @@
   function buildRunFailureSummaryHtml(stats = {}) {
     const normalizedStats = normalizeAutoRunStats(stats);
     return `<span class="run-stat-text failure">错误 ${normalizedStats.failedRuns}</span>`;
+  }
+
+  function buildTargetMailboxTimerHtml(lastTargetEmailAcquiredAt, options = {}) {
+    const now = Number.isFinite(options?.now) ? options.now : Date.now();
+    const normalizedTimestamp = Number.isFinite(lastTargetEmailAcquiredAt) && lastTargetEmailAcquiredAt > 0
+      ? lastTargetEmailAcquiredAt
+      : 0;
+    const elapsedLabel = normalizedTimestamp > 0 && now >= normalizedTimestamp
+      ? formatElapsedDuration(now - normalizedTimestamp)
+      : '--';
+
+    return `<span class="run-stat-text failure-meta">距上次刷到目标邮箱：${escapeHtml(elapsedLabel)}</span>`;
   }
 
   function getRecentSuccessDisplayEntries(stats = {}) {
@@ -177,11 +203,13 @@
   }
 
   return {
+    buildTargetMailboxTimerHtml,
     buildRunFailureSummaryHtml,
     buildRunSuccessDetailsHtml,
     buildRunSuccessSummaryHtml,
     buildRunStatsSummaryHtml,
     buildRunStatsDetailsHtml,
+    formatElapsedDuration,
     formatRunStatsAverageDuration,
     normalizeDisplayedAutoRunStats,
   };

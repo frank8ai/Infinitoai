@@ -853,17 +853,23 @@ async function waitForStep3SignupContext(timeout = 8000) {
     if (isDirectChatgptLoginStep3Entry(location.href)) {
       return true;
     }
+    if (isSignupFlowUnexpectedlyOnLoginPasswordPage()) {
+      return true;
+    }
     if (isStep3AlreadyAdvancedPage(visibleText, location.href)) {
       return true;
     }
     if (isUnsupportedEmailBlockingStep(3) && isUnsupportedEmailText(visibleText, location.href)) {
       throw new Error(getUnsupportedEmailBlockedMessage(3));
     }
-    if (isBlockingAuthFatalError(visibleText)) {
-      throw new Error('Auth fatal error page detected before step 3 entered the signup flow.');
-    }
     if (await handleAuthReturnHomeRecovery(3, visibleText)) {
       throw new Error(getAuthReturnHomeRecoveryErrorMessage(3));
+    }
+    if (await handleAuthRetryActionRecovery(3, visibleText)) {
+      throw new Error(getAuthRetryActionRecoveryErrorMessage(3));
+    }
+    if (isBlockingAuthFatalError(visibleText)) {
+      throw new Error('Auth fatal error page detected before step 3 entered the signup flow.');
     }
 
     await sleep(250);
@@ -1786,6 +1792,9 @@ async function waitForStep3CredentialSubmissionOutcome(startUrl, timeout = 8000)
     if (await handleAuthReturnHomeRecovery(3, visibleText)) {
       throw new Error(getAuthReturnHomeRecoveryErrorMessage(3));
     }
+    if (await handleAuthRetryActionRecovery(3, visibleText)) {
+      throw new Error(getAuthRetryActionRecoveryErrorMessage(3));
+    }
     throwIfAuthOperationTimedOut(3, visibleText);
     if (isBlockingAuthFatalError(visibleText)) {
       throw new Error('Auth fatal error page detected after step 3 password submit.');
@@ -1874,13 +1883,21 @@ async function waitForLoginPasswordField(timeout = 25000) {
   while (Date.now() - start < timeout) {
     throwIfStopped();
 
-    if (await handleAuthReturnHomeRecovery(6)) {
-      throw new Error(getAuthReturnHomeRecoveryErrorMessage(6));
-    }
-
     const passwordInput = findVisiblePasswordInput();
     if (passwordInput) {
       return passwordInput;
+    }
+
+    const visibleText = getVisiblePageText();
+    if (await handleAuthReturnHomeRecovery(6, visibleText)) {
+      throw new Error(getAuthReturnHomeRecoveryErrorMessage(6));
+    }
+    if (await handleAuthRetryActionRecovery(6, visibleText)) {
+      throw new Error(getAuthRetryActionRecoveryErrorMessage(6));
+    }
+    throwIfAuthOperationTimedOut(6, visibleText);
+    if (isBlockingAuthFatalError(visibleText)) {
+      throw new Error('Auth fatal error page detected before the password input appeared.');
     }
 
     await sleep(250);
@@ -1901,6 +1918,10 @@ async function waitForLoginSubmissionOutcome(timeout = 12000) {
     if (await handleAuthReturnHomeRecovery(6, visibleText)) {
       throw new Error(getAuthReturnHomeRecoveryErrorMessage(6));
     }
+    if (await handleAuthRetryActionRecovery(6, visibleText)) {
+      throw new Error(getAuthRetryActionRecoveryErrorMessage(6));
+    }
+    throwIfAuthOperationTimedOut(6, visibleText);
     if (isBlockingAuthFatalError(visibleText)) {
       log(
         `Step 6: Fatal auth state after login submit. URL: ${location.href}; Visible text snapshot: ${summarizeVisibleTextForLog(visibleText) || '(empty)'}`,
@@ -1969,6 +1990,27 @@ function getAuthReturnHomeRecoveryErrorMessage(step) {
   return 'Step 3 blocked: auth issue page offered a "return home" recovery link. Reopen the platform login page and retry with the same email and password.';
 }
 
+function isAuthRetryActionIssueText(text) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) {
+    return false;
+  }
+
+  if (isAuthReturnHomeIssueText(normalized)) {
+    return false;
+  }
+
+  return (isAuthFatalErrorText(normalized) || isAuthOperationTimedOutText(normalized))
+    && /请重试|重试|retry|try again/i.test(normalized);
+}
+
+function getAuthRetryActionRecoveryErrorMessage(step) {
+  if (step === 6) {
+    return 'Step 6 recoverable: auth issue page offered a "retry" recovery action. Refresh the VPS OAuth link and retry with the same email and password.';
+  }
+  return 'Step 3 blocked: auth issue page offered a "retry" recovery action. Reopen the platform login page and retry with the same email and password.';
+}
+
 async function handleAuthReturnHomeRecovery(step, visibleText = getVisiblePageText()) {
   if (!isAuthReturnHomeIssueText(visibleText)) {
     return false;
@@ -1988,6 +2030,25 @@ async function handleAuthReturnHomeRecovery(step, visibleText = getVisiblePageTe
   simulateClick(returnHomeLink);
   log(`Step ${step}: Auth issue page detected. Clicked "返回首页" to recover the login flow.`, 'warn');
   await sleep(500);
+  return true;
+}
+
+async function handleAuthRetryActionRecovery(step, visibleText = getVisiblePageText()) {
+  if (!isAuthRetryActionIssueText(visibleText)) {
+    return false;
+  }
+
+  const retryAction = await waitForElementByText(
+    'a, button, [role="button"], [role="link"]',
+    /重试|retry|try again/i,
+    1500
+  ).catch(() => null);
+
+  if (!retryAction || !isElementVisible(retryAction)) {
+    return false;
+  }
+
+  log(`Step ${step}: Auth issue page exposed a retry action. Handing recovery back to the background flow.`, 'warn');
   return true;
 }
 
@@ -2357,7 +2418,9 @@ Object.assign(authFlow, {
   waitForStep3CredentialSubmissionOutcome,
   isBlockingAuthFatalError,
   getAuthReturnHomeRecoveryErrorMessage,
+  getAuthRetryActionRecoveryErrorMessage,
   handleAuthReturnHomeRecovery,
+  handleAuthRetryActionRecovery,
   resolveLatestPageOauthUrl,
   waitForLoginPasswordField,
   waitForLoginSubmissionOutcome,

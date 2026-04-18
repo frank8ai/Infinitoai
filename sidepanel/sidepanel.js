@@ -32,6 +32,14 @@ const btnLogRoundPrev = document.getElementById('btn-log-round-prev');
 const btnLogRoundNext = document.getElementById('btn-log-round-next');
 const displayLogRound = document.getElementById('display-log-round');
 const btnLogScrollBottom = document.getElementById('btn-log-scroll-bottom');
+const btnViewConsole = document.getElementById('btn-view-console');
+const btnViewAccounts = document.getElementById('btn-view-accounts');
+const consoleView = document.getElementById('console-view');
+const accountsView = document.getElementById('accounts-view');
+const inputAccountsSuccessOnly = document.getElementById('input-accounts-success-only');
+const btnClearAccountRecords = document.getElementById('btn-clear-account-records');
+const btnExportAccountsCsv = document.getElementById('btn-export-accounts-csv');
+const tbodyAccountRecords = document.getElementById('tbody-account-records');
 const inputVpsUrl = document.getElementById('input-vps-url');
 const btnToggleVpsUrl = document.getElementById('btn-toggle-vps-url');
 const selectSignupEntry = document.getElementById('select-signup-entry');
@@ -52,6 +60,7 @@ const runSuccessStats = document.getElementById('run-success-stats');
 const runFailureStats = document.getElementById('run-failure-stats');
 const runSuccessDetails = document.getElementById('run-success-details');
 const runFailureDetails = document.getElementById('run-failure-details');
+const runTargetEmailTimer = document.getElementById('run-target-email-timer');
 const rowMailProvider = document.getElementById('row-mail-provider');
 const selectMailProvider = document.getElementById('select-mail-provider');
 const selectEmailSource = document.getElementById('select-email-source');
@@ -99,6 +108,10 @@ const {
   sanitizeEmailSource,
 } = EmailAddresses;
 const {
+  buildAccountRecordsCsv,
+  normalizeAccountRecords,
+} = AccountRecords;
+const {
   buildTopSettingPayload,
   DEFAULT_BROWSER_BACKEND,
   DEFAULT_FINGERPRINT_PROVIDER,
@@ -114,6 +127,7 @@ const { shouldDisableStepButton, shouldEnableStopButton } = ManualStepControls;
 const { buildLogRoundClipboardText } = SidepanelLogCopy;
 const { isLogNearBottom, shouldShowScrollToBottomButton } = SidepanelLogScroll;
 const {
+  buildTargetMailboxTimerHtml,
   buildRunFailureSummaryHtml,
   buildRunStatsDetailsHtml,
   buildRunSuccessDetailsHtml,
@@ -154,6 +168,10 @@ let keepLogPinnedToBottom = true;
 let logRoundsState = [];
 let selectedLogRoundId = '';
 let followLatestLogRound = true;
+let lastTargetEmailAcquiredAtState = null;
+let accountRecordsState = [];
+let showSuccessOnlyAccountRecords = false;
+let activePanelView = 'console';
 renderTmailorModeOptions();
 
 const ACTION_ICONS = {
@@ -550,6 +568,8 @@ async function restoreState() {
     }
 
     updateAutoRunStatsDisplay(state.autoRunStats);
+    renderAccountRecords(state.accountRecords);
+    updateTargetEmailTimerDisplay(state.lastTargetEmailAcquiredAt);
     updateStatusDisplay(state);
     updateBrowserBackendUI();
     updateProgressCounter();
@@ -583,6 +603,168 @@ function updateAutoRunStatsDisplay(stats = {}) {
   if (runFailureDetails) {
     runFailureDetails.innerHTML = buildRunStatsDetailsHtml(normalizedStats);
   }
+}
+
+function formatAccountTimestamp(value) {
+  const timestamp = String(value || '').trim();
+  if (!timestamp) {
+    return '--';
+  }
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) {
+    return timestamp;
+  }
+  const now = new Date();
+  if (
+    parsed.getFullYear() === now.getFullYear() &&
+    parsed.getMonth() === now.getMonth() &&
+    parsed.getDate() === now.getDate()
+  ) {
+    return parsed.toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  }
+  return parsed.toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+}
+
+function getAccountStatusLabel(status) {
+  switch (status) {
+    case 'success':
+      return 'success';
+    case 'add_phone':
+      return 'add phone';
+    case 'other':
+      return 'other';
+    default:
+      return 'pending';
+  }
+}
+
+function setActivePanelView(view) {
+  activePanelView = view === 'accounts' ? 'accounts' : 'console';
+  const showAccounts = activePanelView === 'accounts';
+
+  consoleView.hidden = showAccounts;
+  accountsView.hidden = !showAccounts;
+  btnViewConsole.classList.toggle('active', !showAccounts);
+  btnViewAccounts.classList.toggle('active', showAccounts);
+  btnViewConsole.setAttribute('aria-pressed', showAccounts ? 'false' : 'true');
+  btnViewAccounts.setAttribute('aria-pressed', showAccounts ? 'true' : 'false');
+}
+
+function renderAccountRecords(records = []) {
+  accountRecordsState = normalizeAccountRecords(records);
+  if (!tbodyAccountRecords) {
+    return;
+  }
+
+  if (accountRecordsState.length === 0) {
+    tbodyAccountRecords.innerHTML = '<tr><td class="empty" colspan="7">暂无账号记录</td></tr>';
+    if (btnClearAccountRecords) {
+      btnClearAccountRecords.disabled = true;
+    }
+    if (btnExportAccountsCsv) {
+      btnExportAccountsCsv.disabled = true;
+    }
+    return;
+  }
+
+  const visibleRecords = showSuccessOnlyAccountRecords ? accountRecordsState.filter((record) => record.status === 'success') : accountRecordsState;
+  if (visibleRecords.length === 0) {
+    tbodyAccountRecords.innerHTML = '<tr><td class="empty" colspan="7">暂无符合条件的账号记录</td></tr>';
+    if (btnClearAccountRecords) {
+      btnClearAccountRecords.disabled = false;
+    }
+    if (btnExportAccountsCsv) {
+      btnExportAccountsCsv.disabled = false;
+    }
+    return;
+  }
+
+  const rows = visibleRecords
+    .slice()
+    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
+    .map((record) => {
+      const createdAtLabel = formatAccountTimestamp(record.createdAt);
+      const emailSourceLabel = record.emailSource || '--';
+      const mailProviderLabel = record.emailSource === 'tmailor' ? '--' : (record.mailProvider || '--');
+      const emailLabel = record.email || '--';
+      const passwordLabel = record.password || '--';
+      const statusLabel = getAccountStatusLabel(record.status);
+      const statusClass = `account-status-${escapeHtmlAttribute(record.status)}`;
+      const rawStatusDetail = record.statusDetail || '--';
+      return `
+        <tr>
+          <td class="account-cell account-cell-meta" data-copy-value="${escapeHtmlAttribute(createdAtLabel)}">${escapeHtml(createdAtLabel)}</td>
+          <td class="account-cell account-cell-meta" data-copy-value="${escapeHtmlAttribute(emailSourceLabel)}">${escapeHtml(emailSourceLabel)}</td>
+          <td class="account-cell account-cell-meta" data-copy-value="${escapeHtmlAttribute(mailProviderLabel)}">${escapeHtml(mailProviderLabel)}</td>
+          <td class="account-cell account-cell-email" data-copy-value="${escapeHtmlAttribute(emailLabel)}">${escapeHtml(emailLabel)}</td>
+          <td class="account-cell account-cell-password" data-copy-value="${escapeHtmlAttribute(passwordLabel)}">${escapeHtml(passwordLabel)}</td>
+          <td class="account-cell account-cell-meta" data-copy-value="${escapeHtmlAttribute(statusLabel)}"><span class="account-status-pill ${statusClass}">${escapeHtml(statusLabel)}</span></td>
+          <td class="account-cell account-cell-raw" data-copy-value="${escapeHtmlAttribute(rawStatusDetail)}" title="${escapeHtmlAttribute(rawStatusDetail)}">${escapeHtml(rawStatusDetail)}</td>
+        </tr>
+      `;
+    });
+
+  tbodyAccountRecords.innerHTML = rows.join('');
+  if (btnClearAccountRecords) {
+    btnClearAccountRecords.disabled = false;
+  }
+  if (btnExportAccountsCsv) {
+    btnExportAccountsCsv.disabled = false;
+  }
+}
+
+if (tbodyAccountRecords) {
+  tbodyAccountRecords.addEventListener('click', async (event) => {
+    const cell = event.target.closest('td[data-copy-value]');
+    if (!cell) {
+      return;
+    }
+
+    const copyValue = cell.dataset.copyValue || '';
+    await copyTextValue(copyValue, '单元格内容已复制');
+  });
+}
+
+function downloadAccountRecordsCsv() {
+  const csv = buildAccountRecordsCsv(accountRecordsState);
+  const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' });
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = `accounts-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+async function clearAccountRecords() {
+  await chrome.runtime.sendMessage({
+    type: 'CLEAR_ACCOUNT_RECORDS',
+    source: 'sidepanel',
+  });
+}
+
+function updateTargetEmailTimerDisplay(lastTargetEmailAcquiredAt = lastTargetEmailAcquiredAtState) {
+  lastTargetEmailAcquiredAtState = Number.isFinite(lastTargetEmailAcquiredAt) && lastTargetEmailAcquiredAt > 0
+    ? lastTargetEmailAcquiredAt
+    : null;
+
+  if (!runTargetEmailTimer) {
+    return;
+  }
+
+  runTargetEmailTimer.innerHTML = buildTargetMailboxTimerHtml(lastTargetEmailAcquiredAtState, {
+    now: Date.now(),
+  });
 }
 
 function updateMailProviderUI() {
@@ -1378,6 +1560,11 @@ document.querySelectorAll('.step-btn').forEach(btn => {
   btn.addEventListener('click', async () => {
     const step = Number(btn.dataset.step);
     await persistCurrentTopSettings();
+    await chrome.runtime.sendMessage({
+      type: 'SAVE_SETTING',
+      source: 'sidepanel',
+      payload: { customPassword: inputPassword.value },
+    });
     if (step === 3) {
       const email = inputEmail.value.trim();
       if (!['33mail', 'tmailor', 'cloudmail'].includes(sanitizeEmailSource(selectEmailSource.value)) && !email) {
@@ -1818,6 +2005,42 @@ tbodyTmailorWhitelist.addEventListener('click', async (event) => {
   await moveWhitelistDomainToBlacklist(button.dataset.domain || '');
 });
 
+btnViewConsole.addEventListener('click', () => {
+  setActivePanelView('console');
+});
+
+btnViewAccounts.addEventListener('click', () => {
+  setActivePanelView('accounts');
+});
+
+if (inputAccountsSuccessOnly) {
+  inputAccountsSuccessOnly.addEventListener('change', () => {
+    showSuccessOnlyAccountRecords = Boolean(inputAccountsSuccessOnly.checked);
+    renderAccountRecords(accountRecordsState);
+  });
+}
+
+btnExportAccountsCsv.addEventListener('click', () => {
+  if (accountRecordsState.length === 0) {
+    showToast('暂无账号记录可导出', 'warn', 2200);
+    return;
+  }
+  downloadAccountRecordsCsv();
+});
+
+btnClearAccountRecords.addEventListener('click', async () => {
+  if (accountRecordsState.length === 0) {
+    showToast('暂无账号记录可清空', 'warn', 2200);
+    return;
+  }
+  if (!window.confirm('确定清空所有账号记录吗？此操作不可恢复。')) {
+    return;
+  }
+
+  await clearAccountRecords();
+  showToast('账号记录已清空', 'success', 2200);
+});
+
 // ============================================================
 // Listen for Background broadcasts
 // ============================================================
@@ -1886,6 +2109,12 @@ chrome.runtime.onMessage.addListener((message) => {
       }
       if (message.payload.autoRunStats) {
         updateAutoRunStatsDisplay(message.payload.autoRunStats);
+      }
+      if (message.payload.accountRecords !== undefined) {
+        renderAccountRecords(message.payload.accountRecords);
+      }
+      if (message.payload.lastTargetEmailAcquiredAt !== undefined) {
+        updateTargetEmailTimerDisplay(message.payload.lastTargetEmailAcquiredAt);
       }
       break;
     }
@@ -1978,6 +2207,11 @@ btnTheme.addEventListener('click', () => {
 initTheme();
 renderStaticActionButtons();
 renderTmailorApiStatus();
+renderAccountRecords([]);
+setActivePanelView('console');
+setInterval(() => {
+  updateTargetEmailTimerDisplay();
+}, 1000);
 restoreState().then(() => {
   syncPasswordToggleLabel();
   updateButtonStates();

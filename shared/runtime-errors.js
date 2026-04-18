@@ -44,6 +44,7 @@
   function shouldRetryStep3WithFreshOauth(error) {
     const message = typeof error === 'string' ? error : error?.message || '';
     return /step 3 blocked: openai auth page timed out before credentials could be submitted/i.test(message)
+      || /step 3 blocked: auth issue page offered a "retry" recovery action\./i.test(message)
       || /step 3 blocked: auth issue page offered a "return home" recovery link\./i.test(message)
       || /step 3 failed: auth fatal error page detected before the password input appeared\./i.test(message)
       || /step 3 failed: auth fatal error page detected after step 3 password submit\./i.test(message)
@@ -56,10 +57,19 @@
 
   function shouldRetryStep6WithFreshOauth(error) {
     const message = typeof error === 'string' ? error : error?.message || '';
-    return /(?:step 6 failed:\s*)?could not find email input on login page\.\s*url:\s*https:\/\/(?:auth|accounts)\.openai\.com\/\S+/i.test(message)
+    return /(?:step 6 recoverable:\s*)?openai auth page timed out before login could complete\./i.test(message)
+      || /(?:step 6 failed:\s*)?could not find email input on login page\.\s*url:\s*https:\/\/(?:auth|accounts)\.openai\.com\/\S+/i.test(message)
+      || /(?:step 6 recoverable:\s*)?auth issue page offered a "retry" recovery action\./i.test(message)
       || /(?:step 6 recoverable:\s*)?auth issue page offered a "return home" recovery link\./i.test(message)
       || /(?:step 6 failed:\s*)?auth fatal error page detected after login submit\./i.test(message)
       || /(?:step 6 failed:\s*)?login did not advance after password submit\. still on the password page\./i.test(message);
+  }
+
+  function shouldRetryStep5WithProfileRefresh(error) {
+    const message = typeof error === 'string' ? error : error?.message || '';
+    return /content script on signup-page did not respond in \d+s\. try refreshing the tab and retry\./i.test(message)
+      || /could not establish connection\.\s*receiving end does not exist/i.test(message)
+      || /message channel closed before a response was received|message channel is closed/i.test(message);
   }
 
   function shouldRetryStep8WithFreshOauth(error) {
@@ -99,6 +109,7 @@
     shouldRetryStep1WithFreshVpsPanel,
     shouldRetryStep3WithPlatformLoginRefresh,
     shouldRetryStep3WithFreshOauth,
+    shouldRetryStep5WithProfileRefresh,
     shouldRetryStep6WithFreshOauth,
     shouldRetryStep7Through9FromStep6,
     shouldRetryStep8WithFreshOauth,

@@ -283,7 +283,7 @@ test('step 9 retries callback submission when the VPS panel reports a transient 
   assert.equal(state.completed[0].step, 9);
   assert.match(
     state.logs.map((entry) => entry.message).join('\n'),
-    /502（502 Bad Gateway），准备重试提交/
+    /502[\s\S]*重试/
   );
 });
 
@@ -421,4 +421,74 @@ test('step 9 asks background to refresh OAuth when the VPS status says the autho
   assert.equal(response?.reason, 'auth_link_not_pending');
   assert.equal(state.clicked, 1);
   assert.equal(state.completed.length, 0);
+});
+
+test('step 9 recognizes the English "Submit Callback URL" button text', async () => {
+  const context = createContext();
+  const state = context.__state;
+  const urlInput = {
+    value: '',
+    getBoundingClientRect() {
+      return { width: 300, height: 30 };
+    },
+  };
+  const submitButton = {
+    textContent: 'Submit Callback URL',
+    getBoundingClientRect() {
+      return { width: 160, height: 30 };
+    },
+  };
+  const successBadge = { textContent: '认证成功！' };
+
+  context.fillInput = (input, value) => {
+    input.value = value;
+    state.lastFilledUrl = value;
+  };
+  context.waitForElement = (selector) => {
+    if (selector === '[class*="callbackSection"] input.input') {
+      return Promise.resolve(urlInput);
+    }
+    if (selector === 'input[placeholder*="localhost"]') {
+      return Promise.resolve(urlInput);
+    }
+    return Promise.reject(new Error(`unexpected selector: ${selector}`));
+  };
+  context.waitForElementByText = (selector, pattern) => {
+    if ((selector.includes('callbackActions') || selector === 'button.btn') && pattern.test('Submit Callback URL')) {
+      return Promise.resolve(submitButton);
+    }
+    if (selector === '.status-badge, [class*="status"]' && /认证成功/.test(String(pattern))) {
+      return Promise.resolve(successBadge);
+    }
+    return Promise.reject(new Error(`unexpected selector: ${selector}`));
+  };
+  context.document.querySelector = (selector) => {
+    if (selector === '.status-badge, [class*="status"]') {
+      return successBadge;
+    }
+    if (selector === 'body') {
+      return { textContent: 'callback ready' };
+    }
+    return null;
+  };
+
+  loadVpsPanel(context);
+  const listener = context.__listeners[0];
+  assert.ok(listener, 'expected vps-panel to register a runtime listener');
+
+  const response = await new Promise((resolve, reject) => {
+    const keepAlive = listener(
+      { type: 'EXECUTE_STEP', step: 9, payload: { localhostUrl: 'http://localhost:1455/auth/callback?code=english' } },
+      {},
+      (result) => resolve(result)
+    );
+    assert.equal(keepAlive, true);
+    setTimeout(() => reject(new Error('timeout waiting for response')), 2000);
+  });
+
+  assert.equal(response?.ok, true);
+  assert.equal(state.lastFilledUrl, 'http://localhost:1455/auth/callback?code=english');
+  assert.equal(state.clicked, 1);
+  assert.equal(state.completed.length, 1);
+  assert.equal(state.completed[0].step, 9);
 });

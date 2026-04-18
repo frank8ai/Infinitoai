@@ -206,16 +206,17 @@ async function step9_vpsVerify(payload) {
   log('Step 9: Filled callback URL');
 
   // Find and click "提交回调 URL" button
+  const callbackSubmitPattern = /(?:提交(?:回调\s*url)?|submit(?:\s+callback)?\s*url)/i;
   let submitBtn = null;
   try {
     submitBtn = await waitForElementByText(
       '[class*="callbackActions"] button, [class*="callbackSection"] button',
-      /提交/,
+      callbackSubmitPattern,
       5000
     );
   } catch {
     try {
-      submitBtn = await waitForElementByText('button.btn', /提交回调/, 5000);
+      submitBtn = await waitForElementByText('button.btn', callbackSubmitPattern, 5000);
     } catch {
       throw new Error('Could not find "提交回调 URL" button. URL: ' + location.href);
     }

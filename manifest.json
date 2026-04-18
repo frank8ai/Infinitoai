@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Infinitoai v3稳定版",
-  "version": "3.0.0",
+  "name": "Infinitoai v3.1",
+  "version": "3.1.0",
   "description": "Automates multi-step OAuth registration workflow",
   "permissions": [
     "sidePanel",
@@ -47,7 +47,9 @@
         "https://tmailor.com/*",
         "https://challenges.cloudflare.com/*"
       ],
-      "js": ["content/turnstile-screenxy-patch.js"],
+      "js": [
+        "content/turnstile-screenxy-patch.js"
+      ],
       "all_frames": true,
       "run_at": "document_start",
       "world": "MAIN"
@@ -60,7 +62,22 @@
         "https://auth.openai.com/*",
         "https://accounts.openai.com/*"
       ],
-      "js": ["shared/verification-code.js", "shared/phone-verification.js", "shared/auth-fatal-errors.js", "shared/unsupported-email.js", "content/utils.js", "content/signup-page.js", "content/openai-auth-step3-flow.js", "content/openai-auth-step6-flow.js", "content/openai-auth-step2-handler.js", "content/openai-auth-step3-handler.js", "content/openai-auth-step5-handler.js", "content/openai-auth-step6-handler.js", "content/openai-auth-step8-handler.js", "content/openai-auth-actions-handler.js"],
+      "js": [
+        "shared/verification-code.js",
+        "shared/phone-verification.js",
+        "shared/auth-fatal-errors.js",
+        "shared/unsupported-email.js",
+        "content/utils.js",
+        "content/signup-page.js",
+        "content/openai-auth-step3-flow.js",
+        "content/openai-auth-step6-flow.js",
+        "content/openai-auth-step2-handler.js",
+        "content/openai-auth-step3-handler.js",
+        "content/openai-auth-step5-handler.js",
+        "content/openai-auth-step6-handler.js",
+        "content/openai-auth-step8-handler.js",
+        "content/openai-auth-actions-handler.js"
+      ],
       "run_at": "document_idle"
     },
     {
@@ -68,7 +85,14 @@
         "https://mail.qq.com/*",
         "https://wx.mail.qq.com/*"
       ],
-      "js": ["shared/qq-refresh.js", "shared/mail-matching.js", "shared/mail-freshness.js", "shared/latest-mail.js", "content/utils.js", "content/qq-mail.js"],
+      "js": [
+        "shared/qq-refresh.js",
+        "shared/mail-matching.js",
+        "shared/mail-freshness.js",
+        "shared/latest-mail.js",
+        "content/utils.js",
+        "content/qq-mail.js"
+      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -76,7 +100,13 @@
       "matches": [
         "https://mail.163.com/*"
       ],
-      "js": ["shared/mail-matching.js", "shared/mail-freshness.js", "shared/latest-mail.js", "content/utils.js", "content/mail-163.js"],
+      "js": [
+        "shared/mail-matching.js",
+        "shared/mail-freshness.js",
+        "shared/latest-mail.js",
+        "content/utils.js",
+        "content/mail-163.js"
+      ],
       "all_frames": true,
       "run_at": "document_idle"
     },
@@ -84,14 +114,23 @@
       "matches": [
         "https://duckduckgo.com/email/settings/autofill*"
       ],
-      "js": ["content/utils.js", "content/duck-mail.js"],
+      "js": [
+        "content/utils.js",
+        "content/duck-mail.js"
+      ],
       "run_at": "document_idle"
     },
     {
       "matches": [
         "https://tmailor.com/*"
       ],
-      "js": ["shared/mail-matching.js", "shared/mail-freshness.js", "shared/latest-mail.js", "content/utils.js", "content/tmailor-mail.js"],
+      "js": [
+        "shared/mail-matching.js",
+        "shared/mail-freshness.js",
+        "shared/latest-mail.js",
+        "content/utils.js",
+        "content/tmailor-mail.js"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -106,5 +145,6 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnL1LIhRCUsB998BkMXdX5EXRGT5jausj5ctHuvvzMitbIevdZbP9cXHucy5CI0kHJXXxsxEv8sXYbbjWclPSmNBYHSA9nXqfirPH3zhJEv04tkqJxwOLOEtVQqu2o5VEyFLKqQDJe4dHIc8uIhDUUDZkp9ZVKl8hxDJXSYxwbPkuUNI0Y5dM8A6KsnMEQae4a5laI7rgZr8OgVBTDwCnOsH6xuluv3UCpXgKxMLwk7kV870TCn1J4ZZW+D5Mf8OLr+sHlb+Cfyq19EnzUnQj69cV6lmIdptYBchjo59b+MrBLstFQ3zxF2h+p/d8OfOo0glhWTJJVuXVtsL0C5o0VQIDAQAB"
 }

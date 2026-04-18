@@ -67,6 +67,9 @@ async function step3_fillEmailPassword(payload) {
     if (await authFlow.handleAuthReturnHomeRecovery?.(3)) {
       throw new Error(authFlow.getAuthReturnHomeRecoveryErrorMessage(3));
     }
+    if (await authFlow.handleAuthRetryActionRecovery?.(3)) {
+      throw new Error(authFlow.getAuthRetryActionRecoveryErrorMessage(3));
+    }
     authFlow.throwIfAuthOperationTimedOut(3);
     if (authFlow.isBlockingAuthFatalError(authFlow.getVisiblePageText())) {
       throw new Error('Auth fatal error page detected before the email input appeared.');
@@ -132,6 +135,9 @@ async function step3_fillEmailPassword(payload) {
   if (!passwordInput) {
     if (await authFlow.handleAuthReturnHomeRecovery?.(3)) {
       throw new Error(authFlow.getAuthReturnHomeRecoveryErrorMessage(3));
+    }
+    if (await authFlow.handleAuthRetryActionRecovery?.(3)) {
+      throw new Error(authFlow.getAuthRetryActionRecoveryErrorMessage(3));
     }
     authFlow.throwIfAuthOperationTimedOut(3);
     if (authFlow.isBlockingAuthFatalError(authFlow.getVisiblePageText())) {

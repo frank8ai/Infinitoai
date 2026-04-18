@@ -1387,6 +1387,120 @@ test('step 3 clicks register instead of treating the login password page as an e
   );
 });
 
+test('step 3 recovers from a login password page retry when the auth page still exposes a signup path', async () => {
+  const state = {
+    stage: 'login-password',
+  };
+
+  const passwordInput = {
+    getBoundingClientRect() {
+      return { width: 220, height: 42 };
+    },
+  };
+  const registerButton = {
+    tagName: 'A',
+    textContent: '请注册',
+    innerText: '请注册',
+    getBoundingClientRect() {
+      return { width: 160, height: 32 };
+    },
+    closest() {
+      return null;
+    },
+  };
+  const signupContinueButton = {
+    textContent: '继续',
+    getBoundingClientRect() {
+      return { width: 240, height: 48 };
+    },
+  };
+
+  const filledValues = [];
+  const clickedTargets = [];
+
+  const context = createContext({
+    href: 'https://auth.openai.com/log-in/password',
+    bodyText: '输入密码 还没有帐户？请注册',
+    waitForElementImpl(selector) {
+      if (selector === 'input[type="password"]' && state.stage === 'signup-password') {
+        return Promise.resolve(passwordInput);
+      }
+      return Promise.reject(new Error(`missing: ${selector}`));
+    },
+    waitForElementByTextImpl(_selector, pattern) {
+      if (/sign\s*up|register|create\s*account|请注册|去注册|注册/i.test(String(pattern)) && state.stage === 'login-password') {
+        return Promise.resolve(registerButton);
+      }
+      if (/continue|sign\s*up|submit|注册|创建|create|继续/i.test(String(pattern)) && state.stage === 'signup-password') {
+        return Promise.resolve(signupContinueButton);
+      }
+      return Promise.reject(new Error('missing'));
+    },
+    querySelectorImpl(selector) {
+      if (selector === 'button[type="submit"]' && state.stage === 'signup-password') {
+        return signupContinueButton;
+      }
+      return null;
+    },
+    querySelectorAllImpl(selector) {
+      if (selector === 'input[type="password"]' && (state.stage === 'login-password' || state.stage === 'signup-password')) {
+        return [passwordInput];
+      }
+      if (selector === 'a, button, [role="button"], [role="link"], span' && state.stage === 'login-password') {
+        return [registerButton];
+      }
+      return [];
+    },
+  });
+  context.fillInput = (_target, value) => {
+    filledValues.push(value);
+  };
+  context.simulateClick = (target) => {
+    clickedTargets.push(target);
+    if (target === registerButton) {
+      state.stage = 'signup-password';
+      context.location.href = 'https://auth.openai.com/create-account/password';
+      context.document.body.innerText = '创建密码 继续';
+      return;
+    }
+    if (target === signupContinueButton) {
+      context.location.href = 'https://auth.openai.com/email-verification';
+      context.document.body.innerText = 'Enter verification code';
+    }
+  };
+
+  loadSignupPage(context);
+
+  const listener = context.__listeners[0];
+  assert.ok(listener, 'expected signup-page to register a runtime listener');
+
+  const response = await new Promise((resolve, reject) => {
+    const keepAlive = listener(
+      { type: 'EXECUTE_STEP', step: 3, payload: { email: 'demo@example.com', password: 'secret-pass' } },
+      {},
+      (result) => resolve(result)
+    );
+    assert.equal(keepAlive, true);
+    setTimeout(() => reject(new Error('timeout waiting for response')), 3000);
+  });
+
+  assert.equal(response?.ok, true);
+  assert.deepEqual(filledValues, ['secret-pass']);
+  assert.deepEqual(clickedTargets, [registerButton, signupContinueButton]);
+  assert.deepEqual(context.__errors, []);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(context.__completions)),
+    [
+      {
+        step: 3,
+        payload: {
+          email: 'demo@example.com',
+        },
+      },
+    ]
+  );
+});
+
 test('step 3 refuses to start typing until the auth page is actually on the signup flow', async () => {
   const emailInput = {
     getBoundingClientRect() {
@@ -2650,6 +2764,61 @@ test('step 3 reports an auth timeout page instead of a missing email field when 
   ]);
 });
 
+test('step 3 treats an auth fatal error page with a retry action as a recoverable platform-login retry', async () => {
+  const retryButton = {
+    textContent: '重试',
+    getBoundingClientRect() {
+      return { width: 120, height: 40 };
+    },
+  };
+
+  const clickedTargets = [];
+  const context = createContext({
+    href: 'https://auth.openai.com/error?payload=demo',
+    bodyText: '身份验证错误 验证过程中出错。请重试。 重试',
+    waitForElementByTextImpl(_selector, pattern) {
+      if (/重试|retry|try again/i.test(String(pattern))) {
+        return Promise.resolve(retryButton);
+      }
+      return Promise.reject(new Error('missing'));
+    },
+  });
+  context.AuthFatalErrors = {
+    ...AuthFatalErrors,
+    isAuthFatalErrorText: AuthFatalErrors.isAuthFatalErrorText,
+  };
+  context.simulateClick = (target) => {
+    clickedTargets.push(target);
+  };
+  loadSignupPage(context);
+
+  const listener = context.__listeners[0];
+  assert.ok(listener, 'expected signup-page to register a runtime listener');
+
+  const response = await new Promise((resolve, reject) => {
+    const keepAlive = listener(
+      { type: 'EXECUTE_STEP', step: 3, payload: { email: 'demo@example.com', password: 'secret-pass' } },
+      {},
+      (result) => resolve(result)
+    );
+    assert.equal(keepAlive, true);
+    setTimeout(() => reject(new Error('timeout waiting for response')), 2000);
+  });
+
+  assert.equal(
+    response?.error,
+    'Step 3 blocked: auth issue page offered a "retry" recovery action. Reopen the platform login page and retry with the same email and password.'
+  );
+  assert.deepEqual(clickedTargets, []);
+  assert.deepEqual(context.__completions, []);
+  assert.deepEqual(context.__errors, [
+    {
+      step: 3,
+      message: response.error,
+    },
+  ]);
+});
+
 test('step 3 keeps filling the credential form when stale timeout copy is visible but the inputs are still actionable', async () => {
   const emailInput = {
     getBoundingClientRect() {
@@ -3337,6 +3506,83 @@ test('step 6 logs a detailed fatal auth snapshot before failing after login subm
     logs.some((entry) => /Step 6: Fatal auth state after login submit\./i.test(entry) && /Oops, something went wrong/i.test(entry)),
     `expected fatal auth snapshot log, got ${JSON.stringify(logs)}`
   );
+});
+
+test('step 6 reports an auth timeout page instead of a generic fatal auth error after login submit', async () => {
+  const state = {
+    bodyText: '输入密码',
+    passwordVisible: true,
+    submitCount: 0,
+  };
+
+  const createVisibleElement = () => ({
+    getBoundingClientRect() {
+      return { width: 120, height: 40 };
+    },
+  });
+
+  const emailInput = createVisibleElement();
+  const passwordInput = createVisibleElement();
+  const submitButton = createVisibleElement();
+
+  const context = createContext({
+    href: 'https://auth.openai.com/u/login/password',
+    bodyText: state.bodyText,
+    waitForElementImpl(selector) {
+      if (selector.includes('type=\"email\"') || selector.includes('name=\"email\"')) {
+        return Promise.resolve(emailInput);
+      }
+      return Promise.reject(new Error(`missing: ${selector}`));
+    },
+    querySelectorImpl(selector) {
+      if (selector === 'button[type=\"submit\"]') {
+        return submitButton;
+      }
+      return null;
+    },
+    querySelectorAllImpl(selector) {
+      if (selector === 'input[type=\"password\"]' && state.passwordVisible) {
+        return [passwordInput];
+      }
+      return [];
+    },
+  });
+  context.AuthFatalErrors = AuthFatalErrors;
+  context.fillInput = () => {};
+  context.simulateClick = () => {
+    state.submitCount += 1;
+    if (state.submitCount === 2) {
+      state.passwordVisible = false;
+      state.bodyText = '糟糕，出错了！ Operation timed out';
+      context.document.body.innerText = state.bodyText;
+    }
+  };
+
+  loadSignupPage(context);
+
+  const listener = context.__listeners[0];
+  assert.ok(listener, 'expected signup-page to register a runtime listener');
+
+  const response = await new Promise((resolve, reject) => {
+    const keepAlive = listener(
+      { type: 'EXECUTE_STEP', step: 6, payload: { email: 'demo@example.com', password: 'timeout-pass' } },
+      {},
+      (result) => resolve(result)
+    );
+    assert.equal(keepAlive, true);
+    setTimeout(() => reject(new Error('timeout waiting for response')), 3000);
+  });
+
+  assert.equal(
+    response?.error,
+    'Step 6 recoverable: OpenAI auth page timed out before login could complete. Refresh the VPS OAuth link and retry with the same email and password.'
+  );
+  assert.deepEqual(context.__errors, [
+    {
+      step: 6,
+      message: response.error,
+    },
+  ]);
 });
 
 test('step 6 clicks the return-home recovery link on auth issue pages before failing recoverably', async () => {

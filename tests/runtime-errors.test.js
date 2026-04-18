@@ -8,6 +8,7 @@ const {
   shouldRetryStep1WithFreshVpsPanel,
   shouldRetryStep3WithPlatformLoginRefresh,
   shouldRetryStep3WithFreshOauth,
+  shouldRetryStep5WithProfileRefresh,
   shouldRetryStep6WithFreshOauth,
   shouldRetryStep7Through9FromStep6,
   shouldRetryStep8WithFreshOauth,
@@ -57,6 +58,10 @@ test('mail poll recovery plan ignores unrelated mailbox errors', () => {
 test('step 3 oauth timeout errors trigger a fresh oauth retry plan', () => {
   assert.equal(
     shouldRetryStep3WithFreshOauth('Step 3 blocked: OpenAI auth page timed out before credentials could be submitted. Reopen the platform login page and retry with the same email and password.'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep3WithFreshOauth('Step 3 blocked: auth issue page offered a "retry" recovery action. Reopen the platform login page and retry with the same email and password.'),
     true
   );
   assert.equal(
@@ -129,6 +134,14 @@ test('step 1 panel load errors trigger a fresh vps-panel retry plan', () => {
 
 test('step 6 auth-page stalls trigger a fresh oauth retry plan', () => {
   assert.equal(
+    shouldRetryStep6WithFreshOauth('Step 6 recoverable: OpenAI auth page timed out before login could complete. Refresh the VPS OAuth link and retry with the same email and password.'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep6WithFreshOauth('Step 6 recoverable: auth issue page offered a "retry" recovery action. Refresh the VPS OAuth link and retry with the same email and password.'),
+    true
+  );
+  assert.equal(
     shouldRetryStep6WithFreshOauth('Step 6 failed: Could not find email input on login page. URL: https://auth.openai.com/sign-in-with-chatgpt/codex/consent'),
     true
   );
@@ -166,6 +179,29 @@ test('step 6 auth-page stalls trigger a fresh oauth retry plan', () => {
   );
 });
 
+test('step 5 stalled profile-page communication errors trigger a refresh-and-refill retry plan', () => {
+  assert.equal(
+    shouldRetryStep5WithProfileRefresh('Content script on signup-page did not respond in 15s. Try refreshing the tab and retry.'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep5WithProfileRefresh('Content script on signup-page did not respond in 60s. Try refreshing the tab and retry.'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep5WithProfileRefresh('Could not establish connection. Receiving end does not exist.'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep5WithProfileRefresh('A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep5WithProfileRefresh('Step 5 blocked: email domain is unsupported on the auth page.'),
+    false
+  );
+});
+
 test('step 8 unexpected auth redirect errors trigger a fresh oauth retry plan', () => {
   assert.equal(
     shouldRetryStep8WithFreshOauth('Step 8 recoverable: auth flow landed on an unexpected page before localhost redirect (unexpected_auth_redirect). Refresh the VPS OAuth link and retry with the same email and password.'),
@@ -188,6 +224,10 @@ test('steps 7-9 generally retry once from step 6 after recoverable failures', ()
   );
   assert.equal(
     shouldRetryStep7Through9FromStep6(9, 'Step 9 failed: Could not establish connection to VPS panel after filling callback URL.'),
+    true
+  );
+  assert.equal(
+    shouldRetryStep7Through9FromStep6(9, 'Step 9 failed: Could not find "提交回调 URL" button. URL: https://panel.example.com/management.html#/'),
     true
   );
 });

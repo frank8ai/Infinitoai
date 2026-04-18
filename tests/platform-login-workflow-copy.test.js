@@ -71,6 +71,20 @@ test('shared and high-frequency warn-ok-error logs prefer Chinese user-facing co
   assert.match(vpsSource, /认证成功/);
 });
 
+test('background tracks when the current target mailbox was last acquired for side panel stats timers', () => {
+  const backgroundSource = readProjectFile('background.js');
+
+  assert.match(backgroundSource, /lastTargetEmailAcquiredAt:\s*null,/);
+  assert.match(
+    backgroundSource,
+    /async function setEmailState\(email,\s*options = \{\}\) \{[\s\S]*lastTargetEmailAcquiredAt:\s*nextTargetEmailAcquiredAt/,
+  );
+  assert.match(
+    backgroundSource,
+    /broadcastDataUpdate\(\{\s*email,\s*lastTargetEmailAcquiredAt:\s*nextTargetEmailAcquiredAt\s*\}\);/,
+  );
+});
+
 test('side panel workflow labels describe the platform login and continue flow', () => {
   const sidepanelHtml = readProjectFile(path.join('sidepanel', 'sidepanel.html'));
 
@@ -464,12 +478,47 @@ test('step 4 starts a direct same-page fill recovery when the verification code 
   );
 });
 
-test('step 3 retries once with the current email and password when the signup credential page stalls', () => {
+test('step 4 recovery monitoring prefers canonical auth-url fallback signals before waiting on the slower signup-page probe', () => {
+  const backgroundSource = readProjectFile('background.js');
+
+  assert.match(
+    backgroundSource,
+    /async function getSignupAuthPageStateForRecoveryMonitor\(\) \{[\s\S]*const fallbackState = await getSignupPageFallbackAuthState\(\)\.catch\(\(\) => null\);[\s\S]*if \(fallbackState\) \{[\s\S]*return fallbackState;[\s\S]*\}[\s\S]*return await getSignupAuthPageState\(\)\.catch\(\(\) => null\);/i
+  );
+  assert.match(
+    backgroundSource,
+    /async function waitForStep4VerificationAdvanceSignal\(step,\s*options = \{\}\) \{[\s\S]*getSignupAuthPageStateForRecoveryMonitor\(\)/i
+  );
+  assert.match(
+    backgroundSource,
+    /async function waitForStep4SlowCodeFillRecovery\(step,\s*code,\s*options = \{\}\) \{[\s\S]*getSignupAuthPageStateForRecoveryMonitor\(\)/i
+  );
+});
+
+test('verification mail steps complete themselves from background recovery when the content-script completion signal is missing', () => {
+  const backgroundSource = readProjectFile('background.js');
+
+  assert.match(
+    backgroundSource,
+    /async function executeVerificationMailStep\(step,\s*state,\s*options\) \{[\s\S]*const submitResult = await submitVerificationCode\(step,\s*result\.code\);[\s\S]*if \(submitResult\?\.accepted\) \{[\s\S]*const currentState = await getState\(\);[\s\S]*currentState\?\.stepStatuses\?\.\[step\]\s*!==\s*'completed'[\s\S]*backgroundVerifiedCompletion:\s*true[\s\S]*await setStepStatus\(step,\s*'completed'\);[\s\S]*await addLog\(`第 \$\{step\} 步已完成`, 'ok'\);[\s\S]*await handleStepData\(step,\s*backgroundCompletionPayload\);[\s\S]*notifyStepComplete\(step,\s*backgroundCompletionPayload\)/i
+  );
+});
+
+test('step 3 keeps retrying the current email and password when the auth page repeatedly times out before credential submission completes', () => {
+  const backgroundSource = readProjectFile('background.js');
   const runtimeErrorsSource = readProjectFile(path.join('shared', 'runtime-errors.js'));
 
   assert.match(
     runtimeErrorsSource,
-    /function shouldRetryStep3WithFreshOauth[\s\S]*passwordless-login button or password input after submitting email[\s\S]*password was filled but the signup page never advanced past the credential form/i
+    /function shouldRetryStep3WithFreshOauth[\s\S]*openai auth page timed out before credentials could be submitted[\s\S]*password was filled but the signup page never advanced past the credential form/i
+  );
+  assert.match(
+    backgroundSource,
+    /const recoveredStep3TimeoutRetryCount = Math\.max\(0,\s*Number\.parseInt\(String\(recoveryState\?\.step3TimeoutRetryCount \?\? 0\),\s*10\) \|\| 0\);/i
+  );
+  assert.match(
+    backgroundSource,
+    /if \(step === 3 && shouldRetryStep3WithFreshOauth\(err\)\) \{[\s\S]*recoverStep3PlatformLogin\(err,\s*\{[\s\S]*attempt:\s*recoveredStep3TimeoutRetryCount \+ 1[\s\S]*reason:\s*'oauth-timeout'[\s\S]*\}\);[\s\S]*step3TimeoutRetryCount:\s*recoveredStep3TimeoutRetryCount \+ 1/i
   );
 });
 
@@ -509,16 +558,29 @@ test('step 3 timeout recovery also reopens the platform login page in signup-ent
   );
 });
 
-test('step 6 retries once with a fresh oauth url after recoverable auth-page stalls', () => {
+test('step 6 retries recoverable auth-page stalls with a fresh oauth url up to 10 times', () => {
   const backgroundSource = readProjectFile('background.js');
 
   assert.match(
     backgroundSource,
-    /if \(step === 6 && !recoveredStep6PlatformLogin && shouldRetryStep6WithFreshOauth\(err\)\)[\s\S]*await recoverStep6PlatformLogin\(err\);[\s\S]*return await executeStepAndWait\(step,\s*delayAfter,\s*\{\s*step6PlatformLogin:\s*true\s*\}\);/i
+    /const STEP6_MAX_OAUTH_RETRY_ATTEMPTS = 10;/i
   );
   assert.match(
     backgroundSource,
-    /async function recoverStep6PlatformLogin\(error\) \{[\s\S]*Refreshing the OAuth link and reopening the auth login page once[\s\S]*await refreshOauthUrlBeforeStep6\(/i
+    /if \(step === 6 && recoveredStep6OauthRetryCount < STEP6_MAX_OAUTH_RETRY_ATTEMPTS && shouldRetryStep6WithFreshOauth\(err\)\)[\s\S]*await recoverStep6PlatformLogin\(err,\s*\{[\s\S]*attempt:\s*recoveredStep6OauthRetryCount \+ 1[\s\S]*maxAttempts:\s*STEP6_MAX_OAUTH_RETRY_ATTEMPTS[\s\S]*\}\);[\s\S]*step6OauthRetryCount:\s*recoveredStep6OauthRetryCount \+ 1/i
+  );
+});
+
+test('step 6 recovery refreshes the oauth link before reopening auth and logs retry counters', () => {
+  const backgroundSource = readProjectFile('background.js');
+
+  assert.match(
+    backgroundSource,
+    /async function recoverStep6PlatformLogin\(error,\s*options = \{\}\) \{[\s\S]*retryLabel = attempt > 0 && maxAttempts > 0[\s\S]*retry \$\{attempt\}\/\$\{maxAttempts\}[\s\S]*await refreshOauthUrlBeforeStep6\(/i
+  );
+  assert.match(
+    backgroundSource,
+    /async function recoverStep6PlatformLogin\(error,\s*options = \{\}\) \{[\s\S]*Refreshing the VPS OAuth link and reopening the auth login page[\s\S]*await reuseOrCreateTab\('signup-page',\s*refreshedState\.oauthUrl/i
   );
 });
 
@@ -554,6 +616,19 @@ test('step 6 refreshes the VPS OAuth link through a dedicated fetch path instead
   assert.match(
     vpsSource,
     /case 'FETCH_OAUTH_URL':[\s\S]*return await fetchOAuthUrlFromPanel\(/i
+  );
+});
+
+test('step 6 prefers the manual custom password before falling back to the generated password', () => {
+  const backgroundSource = readProjectFile('background.js');
+
+  assert.match(
+    backgroundSource,
+    /const effectivePassword = effectiveState\.customPassword \|\| effectiveState\.password \|\| '';/i
+  );
+  assert.match(
+    backgroundSource,
+    /payload:\s*\{\s*email:\s*effectiveState\.email,\s*password:\s*effectivePassword\s*\}/i
   );
 });
 
@@ -691,6 +766,62 @@ test('step 5 completion is revalidated against the live auth page before the bac
   assert.match(
     backgroundSource,
     /validateStep5CompletionBeforeAcceptingSuccess\(payload = \{\}\) \{[\s\S]*const pageState = await waitForStep5AuthStateToSettle\(\);[\s\S]*pageState\?\.hasUnsupportedEmail[\s\S]*pageState\?\.hasReadyProfilePage[\s\S]*pageState\?\.hasVisibleProfileFormInput/i
+  );
+});
+
+test('step 5 retries stalled signup-page communication by refreshing the current auth page up to 2 times', () => {
+  const backgroundSource = readProjectFile('background.js');
+
+  assert.match(
+    backgroundSource,
+    /const STEP5_MAX_PROFILE_RETRY_ATTEMPTS = 2;/i
+  );
+  assert.match(
+    backgroundSource,
+    /const recoveredStep5ProfileRetryCount = Math\.max\(0,\s*Number\.parseInt\(String\(recoveryState\?\.step5ProfileRetryCount \?\? 0\),\s*10\) \|\| 0\);/i
+  );
+  assert.match(
+    backgroundSource,
+    /if \(step === 5 && recoveredStep5ProfileRetryCount < STEP5_MAX_PROFILE_RETRY_ATTEMPTS && shouldRetryStep5WithProfileRefresh\(err\)\)[\s\S]*await recoverStep5ProfilePage\(err,\s*\{[\s\S]*attempt:\s*recoveredStep5ProfileRetryCount \+ 1[\s\S]*maxAttempts:\s*STEP5_MAX_PROFILE_RETRY_ATTEMPTS[\s\S]*\}\);[\s\S]*step5ProfileRetryCount:\s*recoveredStep5ProfileRetryCount \+ 1/i
+  );
+  assert.match(
+    backgroundSource,
+    /async function recoverStep5ProfilePage\(error,\s*options = \{\}\) \{[\s\S]*Reloading the current signup profile page and retrying step 5[\s\S]*await reuseOrCreateTab\('signup-page',\s*signupTab\.url,\s*\{[\s\S]*reloadIfSameUrl:\s*true[\s\S]*\}\);/i
+  );
+});
+
+test('background still resolves step waiters when a replayed step reports STEP_COMPLETE after the step was already marked completed', () => {
+  const backgroundSource = readProjectFile('background.js');
+
+  assert.match(
+    backgroundSource,
+    /if \(currentStepStatus === 'completed'\) \{\s*notifyStepComplete\(message\.step,\s*message\.payload\);\s*return \{ ok: true \};\s*\}/i
+  );
+});
+
+test('active auto-run watchdog uses a persistent alarm fallback so MV3 worker restarts do not disable stall detection', () => {
+  const backgroundSource = readProjectFile('background.js');
+  const autoRunSource = readProjectFile(path.join('shared', 'auto-run.js'));
+
+  assert.match(
+    autoRunSource,
+    /AUTO_RUN_ACTIVE_WATCHDOG_ALARM_NAME = 'infinitoai-auto-run-active-watchdog'[\s\S]*function getAutoRunActiveWatchdogAlarmName\(\)/i
+  );
+  assert.match(
+    backgroundSource,
+    /chrome\.alarms\.onAlarm\.addListener\(\(alarm\) => \{[\s\S]*getAutoRunActiveWatchdogAlarmName\(\)[\s\S]*handlePersistentActiveAutoRunWatchdogAlarm\(\)/i
+  );
+  assert.match(
+    backgroundSource,
+    /function startAutoRunWatchdog\(\) \{[\s\S]*armPersistentAutoRunActiveWatchdog\(/i
+  );
+  assert.match(
+    backgroundSource,
+    /function touchAutoRunWatchdog\(entry = null\) \{[\s\S]*armPersistentAutoRunActiveWatchdog\(/i
+  );
+  assert.match(
+    backgroundSource,
+    /async function handlePersistentActiveAutoRunWatchdogAlarm\(\) \{[\s\S]*if \(autoRunWatchdogReject\) \{[\s\S]*autoRunWatchdogReject\(error\);[\s\S]*\}[\s\S]*await finalizePersistentAutoRunWatchdogTimeout\(/i
   );
 });
 
