@@ -76,6 +76,41 @@
           </div>
         </div>
       </div>
+      <div class="data-row">
+        <span class="data-label">OAuth</span>
+        <div class="data-select-shell">
+          <select id="select-oauth-backend" class="data-select">
+            <option value="vps">VPS Panel</option>
+            <option value="codex2api">Codex2API</option>
+          </select>
+          <span class="data-select-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none">
+              <path d="M3.5 5.75L8 10.25L12.5 5.75" />
+            </svg>
+          </span>
+        </div>
+      </div>
+      <div class="data-row data-row-stack" id="row-codex2api-settings" style="display:none;">
+        <span class="data-label">Codex2API</span>
+        <div class="mail-domain-groups">
+          <label class="mail-domain-group active">
+            <span class="mail-domain-title">API</span>
+            <input type="text" id="input-codex2api-base-url" class="data-input" placeholder="https://codex2api.bitpowerhub.com" />
+          </label>
+          <label class="mail-domain-group active">
+            <span class="mail-domain-title">Admin Key</span>
+            <input type="password" id="input-codex2api-admin-key" class="data-input" placeholder="Codex2API Admin Key" />
+          </label>
+          <label class="mail-domain-group active">
+            <span class="mail-domain-title">Proxy</span>
+            <input type="text" id="input-codex2api-proxy-url" class="data-input" placeholder="optional, e.g. http://127.0.0.1:7890" />
+          </label>
+          <label class="mail-domain-group active">
+            <span class="mail-domain-title">Name</span>
+            <input type="text" id="input-codex2api-account-name" class="data-input" placeholder="optional account name" />
+          </label>
+        </div>
+      </div>
       <div class="data-row" id="row-mail-provider">
         <span class="data-label">Mail</span>
         <div class="data-select-shell">

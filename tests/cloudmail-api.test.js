@@ -173,3 +173,38 @@ test('pollCloudMailVerificationCode reports no matching mail after polling', asy
   );
   assert.equal(listCalls, 2);
 });
+
+test('pollCloudMailVerificationCode retries transient list fetch failures', async () => {
+  let listCalls = 0;
+  const result = await pollCloudMailVerificationCode({
+    config: {
+      baseUrl: 'https://mail.example.com',
+      adminPassword: 'secret',
+    },
+    email: 'target@finchaintalk.com',
+    maxAttempts: 2,
+    intervalMs: 1,
+    sleep: async () => {},
+    fetchImpl: async () => {
+      listCalls += 1;
+      if (listCalls === 1) {
+        throw new Error('Failed to fetch');
+      }
+      return createJsonResponse({
+        results: [
+          {
+            id: 'mail-1',
+            source: 'noreply@openai.com',
+            address: 'target@finchaintalk.com',
+            subject: 'Your OpenAI code is 333333',
+            text: 'Your OpenAI verification code is 333333',
+            createdAt: '2026-04-18T08:01:00Z',
+          },
+        ],
+      });
+    },
+  });
+
+  assert.equal(result.code, '333333');
+  assert.equal(listCalls, 2);
+});

@@ -1,6 +1,6 @@
 // background.js — Service Worker: orchestration, state, tab management, message routing
 
-importScripts('shared/email-addresses.js', 'shared/mail-provider-rotation.js', 'shared/mail-matching.js', 'shared/mail-freshness.js', 'shared/latest-mail.js', 'shared/tmailor-domains.js', 'shared/tmailor-api.js', 'shared/cloudmail-api.js', 'shared/tmailor-errors.js', 'shared/tmailor-mailbox-strategy.js', 'shared/tmailor-verification-profiles.js', 'shared/flow-recovery.js', 'shared/content-script-queue.js', 'shared/login-verification-codes.js', 'data/names.js', 'shared/flow-runner.js', 'shared/runtime-errors.js', 'shared/auto-run.js', 'shared/auto-run-failure-stats.js', 'shared/duck-mail-errors.js', 'shared/sidepanel-settings.js', 'shared/tab-reclaim.js');
+importScripts('shared/email-addresses.js', 'shared/mail-provider-rotation.js', 'shared/mail-matching.js', 'shared/mail-freshness.js', 'shared/latest-mail.js', 'shared/tmailor-domains.js', 'shared/tmailor-api.js', 'shared/cloudmail-api.js', 'shared/codex2api-oauth.js', 'shared/tmailor-errors.js', 'shared/tmailor-mailbox-strategy.js', 'shared/tmailor-verification-profiles.js', 'shared/flow-recovery.js', 'shared/content-script-queue.js', 'shared/login-verification-codes.js', 'data/names.js', 'shared/flow-runner.js', 'shared/runtime-errors.js', 'shared/auto-run.js', 'shared/auto-run-failure-stats.js', 'shared/duck-mail-errors.js', 'shared/sidepanel-settings.js', 'shared/tab-reclaim.js');
 
 const LOG_PREFIX = '[Infinitoai:bg]';
 const DUCK_AUTOFILL_URL = 'https://duckduckgo.com/email/settings/autofill';
@@ -63,6 +63,7 @@ const { DEFAULT_EMAIL_SOURCE, generate33MailAddress, get33MailDomainForProvider,
 const { chooseMailProviderForAutoRun, getConfiguredRotatableMailProviders, getNextMailProviderAvailabilityTimestamp, isRotatableMailProvider, pruneMailProviderUsage, recordMailProviderUsage } = MailProviderRotation;
 const { DEFAULT_TMAILOR_DOMAIN_STATE, extractEmailDomain, isAllowedTmailorDomain, mergeTmailorDomainStates, normalizeTmailorDomainState, recordTmailorDomainFailure, recordTmailorDomainSuccess, shouldBlacklistTmailorDomainForError } = TmailorDomains;
 const { createCloudMailEmail, normalizeCloudMailConfig, pollCloudMailVerificationCode } = CloudMailApi;
+const { exchangeCodex2ApiOAuthCallback, generateCodex2ApiOAuthUrl, normalizeCodex2ApiOAuthConfig } = Codex2ApiOAuth;
 const {
   checkTmailorApiConnectivity,
   createTmailorApiCaptchaCooldownUntil,
@@ -154,6 +155,8 @@ const SENSITIVE_STATE_KEYS = [
   'logs',
   'logRounds',
   'cloudMailAdminPassword',
+  'codex2ApiAdminKey',
+  'codex2ApiOAuthSessionId',
 ];
 
 const SENSITIVE_DATA_UPDATE_KEYS = new Set([
@@ -168,6 +171,8 @@ const SENSITIVE_DATA_UPDATE_KEYS = new Set([
   'logs',
   'logRounds',
   'cloudMailAdminPassword',
+  'codex2ApiAdminKey',
+  'codex2ApiOAuthSessionId',
 ]);
 
 let automationWindowId = null;
@@ -306,6 +311,12 @@ const DEFAULT_STATE = {
   cloudMailAdminPassword: '',
   cloudMailDomains: '',
   cloudMailSubdomain: '',
+  oauthBackend: 'vps',
+  codex2ApiBaseUrl: '',
+  codex2ApiAdminKey: '',
+  codex2ApiProxyUrl: '',
+  codex2ApiAccountName: '',
+  codex2ApiOAuthSessionId: '',
   autoRunCount: DEFAULT_AUTO_RUN_COUNT,
   autoRunInfinite: DEFAULT_AUTO_RUN_INFINITE,
   autoRunStats: normalizeAutoRunStats({
@@ -624,6 +635,35 @@ async function ensureCloudMailOriginPermission(baseUrl) {
 
   if (!granted) {
     throw new Error(`CloudMail origin permission was not granted for ${originPattern}. Approve the CloudMail API origin, then retry.`);
+  }
+
+  return originPattern;
+}
+
+async function ensureCodex2ApiOriginPermission(baseUrl) {
+  const originPattern = getOriginPermissionPatternFromUrl(baseUrl);
+  if (!originPattern) {
+    throw new Error('Invalid Codex2API address. Enter a valid http or https Codex2API address in the Side Panel.');
+  }
+
+  if (!chrome.permissions?.contains || !chrome.permissions?.request) {
+    return originPattern;
+  }
+
+  const alreadyGranted = await chrome.permissions.contains({ origins: [originPattern] });
+  if (alreadyGranted) {
+    return originPattern;
+  }
+
+  let granted = false;
+  try {
+    granted = await chrome.permissions.request({ origins: [originPattern] });
+  } catch {
+    throw new Error(`Codex2API origin permission was not granted for ${originPattern}. Approve the Codex2API origin, then retry.`);
+  }
+
+  if (!granted) {
+    throw new Error(`Codex2API origin permission was not granted for ${originPattern}. Approve the Codex2API origin, then retry.`);
   }
 
   return originPattern;
@@ -1859,6 +1899,11 @@ async function handleMessage(message, sender) {
       if (message.payload.cloudMailAdminPassword !== undefined) persistentUpdates.cloudMailAdminPassword = message.payload.cloudMailAdminPassword;
       if (message.payload.cloudMailDomains !== undefined) persistentUpdates.cloudMailDomains = message.payload.cloudMailDomains;
       if (message.payload.cloudMailSubdomain !== undefined) persistentUpdates.cloudMailSubdomain = message.payload.cloudMailSubdomain;
+      if (message.payload.oauthBackend !== undefined) persistentUpdates.oauthBackend = message.payload.oauthBackend;
+      if (message.payload.codex2ApiBaseUrl !== undefined) persistentUpdates.codex2ApiBaseUrl = message.payload.codex2ApiBaseUrl;
+      if (message.payload.codex2ApiAdminKey !== undefined) persistentUpdates.codex2ApiAdminKey = message.payload.codex2ApiAdminKey;
+      if (message.payload.codex2ApiProxyUrl !== undefined) persistentUpdates.codex2ApiProxyUrl = message.payload.codex2ApiProxyUrl;
+      if (message.payload.codex2ApiAccountName !== undefined) persistentUpdates.codex2ApiAccountName = message.payload.codex2ApiAccountName;
       if (message.payload.autoRunCount !== undefined) persistentUpdates.autoRunCount = sanitizeAutoRunCount(message.payload.autoRunCount);
       if (message.payload.autoRunInfinite !== undefined) persistentUpdates.autoRunInfinite = sanitizeInfiniteAutoRun(message.payload.autoRunInfinite);
       if (message.payload.autoRotateMailProvider !== undefined) persistentUpdates.autoRotateMailProvider = sanitizeAutoRotateMailProvider(message.payload.autoRotateMailProvider);
@@ -2515,6 +2560,19 @@ function getCurrentEmailSource(state) {
 
 function getCurrentAutoRotateMailProvider(state) {
   return sanitizeAutoRotateMailProvider(state?.autoRotateMailProvider ?? DEFAULT_AUTO_ROTATE_MAIL_PROVIDER);
+}
+
+function getCurrentOAuthBackend(state) {
+  return state?.oauthBackend === 'codex2api' ? 'codex2api' : 'vps';
+}
+
+function getCodex2ApiOAuthConfigFromState(state = {}) {
+  return normalizeCodex2ApiOAuthConfig({
+    baseUrl: state.codex2ApiBaseUrl,
+    adminKey: state.codex2ApiAdminKey,
+    proxyUrl: state.codex2ApiProxyUrl,
+    accountName: state.codex2ApiAccountName,
+  });
 }
 
 function getEmailSourceLabel(emailSource) {
@@ -3286,10 +3344,16 @@ async function autoRunLoop(totalRuns, infiniteMode = false, options = {}) {
         inbucketMailbox: prevState.inbucketMailbox,
         cloudMailBaseUrl: prevState.cloudMailBaseUrl,
         cloudMailAdminEmail: prevState.cloudMailAdminEmail,
-        cloudMailAdminPassword: prevState.cloudMailAdminPassword,
-        cloudMailDomains: prevState.cloudMailDomains,
-        cloudMailSubdomain: prevState.cloudMailSubdomain,
-        autoRunCount: sanitizeAutoRunCount(prevState.autoRunCount),
+      cloudMailAdminPassword: prevState.cloudMailAdminPassword,
+      cloudMailDomains: prevState.cloudMailDomains,
+      cloudMailSubdomain: prevState.cloudMailSubdomain,
+      oauthBackend: prevState.oauthBackend,
+      codex2ApiBaseUrl: prevState.codex2ApiBaseUrl,
+      codex2ApiAdminKey: prevState.codex2ApiAdminKey,
+      codex2ApiProxyUrl: prevState.codex2ApiProxyUrl,
+      codex2ApiAccountName: prevState.codex2ApiAccountName,
+      codex2ApiOAuthSessionId: prevState.codex2ApiOAuthSessionId,
+      autoRunCount: sanitizeAutoRunCount(prevState.autoRunCount),
         autoRunInfinite: sanitizeInfiniteAutoRun(prevState.autoRunInfinite),
         autoRunStats: prevState.autoRunStats || { successfulRuns: autoRunSuccessfulRuns, failedRuns: autoRunFailedRuns },
         mailProviderUsage: pruneMailProviderUsage(prevState.mailProviderUsage),
@@ -3521,7 +3585,40 @@ async function resumeAutoRun() {
 // Step 1: Get OAuth Link (via vps-panel.js)
 // ============================================================
 
+async function fetchFreshOauthUrlFromCodex2Api(state, options = {}) {
+  const logStep = Number.parseInt(String(options?.logStep ?? 1), 10) || 1;
+  const config = getCodex2ApiOAuthConfigFromState(state);
+  await ensureCodex2ApiOriginPermission(config.baseUrl);
+  await addLog(`Step ${logStep}: Requesting Codex2API OAuth authorization link...`, 'info');
+  const result = await generateCodex2ApiOAuthUrl(config);
+  await setState({
+    oauthUrl: result.oauthUrl,
+    codex2ApiOAuthSessionId: result.sessionId,
+  });
+  broadcastTrustedStateUpdated();
+  await addLog(`第 ${logStep} 步：已获取 Codex2API OAuth 授权链接。`, 'ok');
+  return {
+    ...await getState(),
+    oauthUrl: result.oauthUrl,
+    codex2ApiOAuthSessionId: result.sessionId,
+  };
+}
+
+async function fetchFreshOauthUrlFromBackend(state, options = {}) {
+  if (getCurrentOAuthBackend(state) === 'codex2api') {
+    return await fetchFreshOauthUrlFromCodex2Api(state, options);
+  }
+  return await fetchFreshOauthUrlFromVps(state, options);
+}
+
 async function executeStep1(state) {
+  if (getCurrentOAuthBackend(state) === 'codex2api') {
+    const result = await fetchFreshOauthUrlFromCodex2Api(state, { logStep: 1 });
+    await setStepStatus(1, 'completed');
+    notifyStepComplete(1, { oauthUrl: result.oauthUrl, codex2ApiOAuthSessionId: result.codex2ApiOAuthSessionId });
+    return;
+  }
+
   if (!state.vpsUrl) {
     throw new Error('No VPS URL configured. Enter VPS address in Side Panel first.');
   }
@@ -4035,7 +4132,9 @@ async function pollVerificationCodeFromMail(step, mail, payload) {
       },
       onPollAttempt: async (event) => {
         await assertVerificationMailStepNotBlockedDuringPolling(step);
-        const candidateLabel = event.candidateFound ? '发现候选邮件' : '暂未发现匹配邮件';
+        const candidateLabel = event.error
+          ? `请求暂时失败：${event.error.message}`
+          : event.candidateFound ? '发现候选邮件' : '暂未发现匹配邮件';
         await addLog(`Step ${step}: CloudMail API 轮询 ${event.attempt}/${event.maxAttempts}（${candidateLabel}）`, 'info');
       },
     });
@@ -5285,7 +5384,7 @@ async function fetchFreshOauthUrlFromVps(state, options = {}) {
 }
 
 async function refreshOauthUrlBeforeStep6(state, reason = 'Refreshing the VPS OAuth link before login...') {
-  return await fetchFreshOauthUrlFromVps(state, {
+  return await fetchFreshOauthUrlFromBackend(state, {
     logStep: 6,
     reason,
   });
@@ -5325,13 +5424,13 @@ async function recoverStep6PlatformLogin(error) {
   const state = await getState();
   const message = error?.message || String(error || 'unknown step 6 error');
   await addLog(
-    `Step 6: ${message} Refreshing the VPS OAuth link and reopening the auth login page once with the current email/password...`,
+    `Step 6: ${message} Refreshing the OAuth link and reopening the auth login page once with the current email/password...`,
     'warn'
   );
 
   const refreshedState = await refreshOauthUrlBeforeStep6(
     state,
-    'Refreshing the VPS OAuth link because the auth login page stalled before completion...'
+    'Refreshing the OAuth link because the auth login page stalled before completion...'
   );
   if (!refreshedState.oauthUrl) {
     throw error;
@@ -5352,7 +5451,7 @@ async function executeStep6(state) {
     state,
     manualRunActive
       ? 'Manual run detected. Refreshing the VPS OAuth link before login...'
-      : 'Refreshing the VPS OAuth link before login so the auth session stays fresh...'
+      : 'Refreshing the OAuth link before login so the auth session stays fresh...'
   );
 
   if (!effectiveState.oauthUrl) {
@@ -5831,6 +5930,21 @@ async function executeStep9(state) {
   if (!effectiveState.localhostUrl) {
     throw new Error('No localhost URL. Complete step 8 first.');
   }
+
+  if (getCurrentOAuthBackend(effectiveState) === 'codex2api') {
+    const config = getCodex2ApiOAuthConfigFromState(effectiveState);
+    await ensureCodex2ApiOriginPermission(config.baseUrl);
+    await addLog('Step 9: Submitting callback URL to Codex2API...', 'info');
+    const result = await exchangeCodex2ApiOAuthCallback(config, {
+      sessionId: effectiveState.codex2ApiOAuthSessionId,
+      callbackUrl: effectiveState.localhostUrl,
+    });
+    await addLog(`第 9 步：Codex2API OAuth 账号已添加${result?.email ? `：${result.email}` : '。'}`, 'ok');
+    await setStepStatus(9, 'completed');
+    notifyStepComplete(9, result || {});
+    return;
+  }
+
   if (!effectiveState.vpsUrl) {
     throw new Error('VPS URL not set. Please enter VPS URL in the side panel.');
   }

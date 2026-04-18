@@ -342,7 +342,27 @@
         await options.onPollStart({ attempt, maxAttempts });
       }
 
-      const items = (await fetchCloudMailList(config, email, options)).map(normalizeCloudMailItem);
+      let items = [];
+      try {
+        items = (await fetchCloudMailList(config, email, options)).map(normalizeCloudMailItem);
+      } catch (err) {
+        if (typeof options.onPollAttempt === 'function') {
+          await options.onPollAttempt({
+            attempt,
+            maxAttempts,
+            matchedCount: 0,
+            candidateFound: false,
+            error: err,
+          });
+        }
+        if (attempt >= maxAttempts) {
+          throw err;
+        }
+        if (intervalMs > 0) {
+          await sleep(intervalMs);
+        }
+        continue;
+      }
       const latestMatch = findLatestMatchingItem(items, (mail) => {
         if (!isOpenAiVerificationMail(mail, step, email)) return false;
         if (!isMailFresh(mail.timestamp, {

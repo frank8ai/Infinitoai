@@ -514,7 +514,7 @@ test('step 6 retries once with a fresh oauth url after recoverable auth-page sta
   );
   assert.match(
     backgroundSource,
-    /async function recoverStep6PlatformLogin\(error\) \{[\s\S]*Refreshing the VPS OAuth link and reopening the auth login page once[\s\S]*await refreshOauthUrlBeforeStep6\(/i
+    /async function recoverStep6PlatformLogin\(error\) \{[\s\S]*Refreshing the OAuth link and reopening the auth login page once[\s\S]*await refreshOauthUrlBeforeStep6\(/i
   );
 });
 

@@ -109,6 +109,20 @@ https://your-panel.example.com/management.html#/oauth
 
 Step 1 和 Step 9 都依赖这个地址。
 
+### `OAuth`
+
+默认使用 `VPS Panel`，也就是原来的页面自动化方式。
+
+也可以切换为 `Codex2API`：
+
+- `API`：Codex2API 管理地址，例如 `https://codex2api.bitpowerhub.com`
+- `Admin Key`：Codex2API 管理密钥
+- `Proxy`：可选；授权换 token 时使用的代理
+- `Name`：可选；写入 Codex2API 号池时使用的账号名称
+
+`Codex2API` 模式下，Step 1 会调用 Codex2API 接口生成 OpenAI 授权链接；Step 9 会把 localhost callback 提交给 Codex2API，由 Codex2API 自己换 token 并加入号池。
+这种模式不需要打开旧 VPS 面板。
+
 ### `CloudMail`
 
 当 `Source = CloudMail` 时，需要填写：
@@ -609,6 +623,7 @@ data/                            姓名、域名等静态数据
 - Console 日志、Toast、复制出来的日志历史都会先做脱敏处理
 - 普通状态广播不会再携带密码、OAuth URL、localhost callback 或 TMailor token
 - 扩展不再请求 `<all_urls>`；固定权限只覆盖 OpenAI、邮箱和 TMailor 等已知站点，VPS 面板域名会在使用时按需授权
+- Codex2API Admin Key 只保存在可信配置里，不会发给内容脚本，也不会出现在普通日志或状态广播中
 - 当前 run 的敏感值仍会保存在可信会话态里，便于 Side Panel 展示、复制和流程恢复
 
 ## 测试
@@ -631,4 +646,5 @@ node .\tests\runtime-state-security.test.js
 node .\tests\log-redaction.test.js
 node .\tests\data-update-redaction.test.js
 node .\tests\cloudmail-api.test.js
+node .\tests\codex2api-oauth.test.js
 ```

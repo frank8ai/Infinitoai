@@ -24,6 +24,11 @@
     'cloudMailAdminPassword',
     'cloudMailDomains',
     'cloudMailSubdomain',
+    'oauthBackend',
+    'codex2ApiBaseUrl',
+    'codex2ApiAdminKey',
+    'codex2ApiProxyUrl',
+    'codex2ApiAccountName',
     'autoRunCount',
     'autoRunInfinite',
     'autoRotateMailProvider',
@@ -70,6 +75,10 @@
       : DEFAULT_EMAIL_SOURCE;
   }
 
+  function sanitizeOAuthBackend(value) {
+    return value === 'codex2api' ? 'codex2api' : 'vps';
+  }
+
   function normalizeEmailDomain(domain) {
     return String(domain || '').trim().replace(/^@+/, '').toLowerCase();
   }
@@ -95,6 +104,11 @@
       cloudMailAdminPassword: typeof value.cloudMailAdminPassword === 'string' ? value.cloudMailAdminPassword : '',
       cloudMailDomains: typeof value.cloudMailDomains === 'string' ? value.cloudMailDomains : '',
       cloudMailSubdomain: typeof value.cloudMailSubdomain === 'string' ? value.cloudMailSubdomain : '',
+      oauthBackend: sanitizeOAuthBackend(value.oauthBackend),
+      codex2ApiBaseUrl: typeof value.codex2ApiBaseUrl === 'string' ? value.codex2ApiBaseUrl : '',
+      codex2ApiAdminKey: typeof value.codex2ApiAdminKey === 'string' ? value.codex2ApiAdminKey : '',
+      codex2ApiProxyUrl: typeof value.codex2ApiProxyUrl === 'string' ? value.codex2ApiProxyUrl : '',
+      codex2ApiAccountName: typeof value.codex2ApiAccountName === 'string' ? value.codex2ApiAccountName : '',
       autoRunCount: sanitizeAutoRunCount(value.autoRunCount),
       autoRunInfinite: sanitizeInfiniteAutoRun(value.autoRunInfinite),
       autoRotateMailProvider: sanitizeAutoRotateMailProvider(value.autoRotateMailProvider),
@@ -113,6 +127,10 @@
       cloudMailAdminPassword: normalized.cloudMailAdminPassword.trim(),
       cloudMailDomains: normalized.cloudMailDomains.trim(),
       cloudMailSubdomain: normalized.cloudMailSubdomain.trim().replace(/^@+/, '').toLowerCase(),
+      codex2ApiBaseUrl: normalized.codex2ApiBaseUrl.trim().replace(/\/+$/, ''),
+      codex2ApiAdminKey: normalized.codex2ApiAdminKey.trim(),
+      codex2ApiProxyUrl: normalized.codex2ApiProxyUrl.trim(),
+      codex2ApiAccountName: normalized.codex2ApiAccountName.trim(),
     };
   }
 
@@ -176,5 +194,6 @@
     sanitizeAutoRotateMailProvider,
     sanitizeEmailSource,
     sanitizeInfiniteAutoRun,
+    sanitizeOAuthBackend,
   };
 });

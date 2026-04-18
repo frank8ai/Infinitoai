@@ -34,6 +34,12 @@ const displayLogRound = document.getElementById('display-log-round');
 const btnLogScrollBottom = document.getElementById('btn-log-scroll-bottom');
 const inputVpsUrl = document.getElementById('input-vps-url');
 const btnToggleVpsUrl = document.getElementById('btn-toggle-vps-url');
+const selectOauthBackend = document.getElementById('select-oauth-backend');
+const rowCodex2ApiSettings = document.getElementById('row-codex2api-settings');
+const inputCodex2ApiBaseUrl = document.getElementById('input-codex2api-base-url');
+const inputCodex2ApiAdminKey = document.getElementById('input-codex2api-admin-key');
+const inputCodex2ApiProxyUrl = document.getElementById('input-codex2api-proxy-url');
+const inputCodex2ApiAccountName = document.getElementById('input-codex2api-account-name');
 const runSuccessStats = document.getElementById('run-success-stats');
 const runFailureStats = document.getElementById('run-failure-stats');
 const runSuccessDetails = document.getElementById('run-success-details');
@@ -445,6 +451,19 @@ async function restoreState() {
     if (state.vpsUrl) {
       inputVpsUrl.value = state.vpsUrl;
     }
+    selectOauthBackend.value = state.oauthBackend === 'codex2api' ? 'codex2api' : 'vps';
+    if (state.codex2ApiBaseUrl) {
+      inputCodex2ApiBaseUrl.value = state.codex2ApiBaseUrl;
+    }
+    if (state.codex2ApiAdminKey) {
+      inputCodex2ApiAdminKey.value = state.codex2ApiAdminKey;
+    }
+    if (state.codex2ApiProxyUrl) {
+      inputCodex2ApiProxyUrl.value = state.codex2ApiProxyUrl;
+    }
+    if (state.codex2ApiAccountName) {
+      inputCodex2ApiAccountName.value = state.codex2ApiAccountName;
+    }
     if (state.mailProvider) {
       selectMailProvider.value = state.mailProvider;
     }
@@ -496,6 +515,7 @@ async function restoreState() {
     updateAutoRunStatsDisplay(state.autoRunStats);
     updateStatusDisplay(state);
     updateProgressCounter();
+    updateOAuthBackendUI();
     updateMailProviderUI();
     updateEmailSourceUI();
     renderTmailorDomainTables();
@@ -534,6 +554,12 @@ function updateMailProviderUI() {
   rowMailProvider.style.display = usesApiMailbox ? 'none' : '';
   rowInbucketHost.style.display = !usesApiMailbox && useInbucket ? '' : 'none';
   rowInbucketMailbox.style.display = !usesApiMailbox && useInbucket ? '' : 'none';
+}
+
+function updateOAuthBackendUI() {
+  const useCodex2Api = selectOauthBackend.value === 'codex2api';
+  document.getElementById('row-vps').style.display = useCodex2Api ? 'none' : '';
+  rowCodex2ApiSettings.style.display = useCodex2Api ? '' : 'none';
 }
 
 function getEmailSourceLabel() {
@@ -1487,6 +1513,11 @@ async function saveTopSetting(payload) {
 function collectTopSettingPayload(overrides = {}) {
   return buildTopSettingPayload({
     vpsUrl: inputVpsUrl.value,
+    oauthBackend: selectOauthBackend.value,
+    codex2ApiBaseUrl: inputCodex2ApiBaseUrl.value,
+    codex2ApiAdminKey: inputCodex2ApiAdminKey.value,
+    codex2ApiProxyUrl: inputCodex2ApiProxyUrl.value,
+    codex2ApiAccountName: inputCodex2ApiAccountName.value,
     mailProvider: selectMailProvider.value,
     emailSource: selectEmailSource.value,
     mailDomainSettings: mailDomainSettingsState,
@@ -1550,6 +1581,27 @@ inputEmail.addEventListener('change', async () => {
 inputVpsUrl.addEventListener('input', async () => {
   const vpsUrl = inputVpsUrl.value.trim();
   await saveTopSetting({ vpsUrl });
+});
+
+selectOauthBackend.addEventListener('change', async () => {
+  updateOAuthBackendUI();
+  await saveTopSetting({ oauthBackend: selectOauthBackend.value });
+});
+
+inputCodex2ApiBaseUrl.addEventListener('change', async () => {
+  await saveTopSetting({ codex2ApiBaseUrl: inputCodex2ApiBaseUrl.value.trim() });
+});
+
+inputCodex2ApiAdminKey.addEventListener('change', async () => {
+  await saveTopSetting({ codex2ApiAdminKey: inputCodex2ApiAdminKey.value });
+});
+
+inputCodex2ApiProxyUrl.addEventListener('change', async () => {
+  await saveTopSetting({ codex2ApiProxyUrl: inputCodex2ApiProxyUrl.value.trim() });
+});
+
+inputCodex2ApiAccountName.addEventListener('change', async () => {
+  await saveTopSetting({ codex2ApiAccountName: inputCodex2ApiAccountName.value.trim() });
 });
 
 inputPassword.addEventListener('change', async () => {
