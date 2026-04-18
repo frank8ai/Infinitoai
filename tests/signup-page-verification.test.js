@@ -1745,6 +1745,121 @@ test('step 2 continues through the create-account session-ended landing page by 
   ]);
 });
 
+test('step 2 recovers from the ChatGPT auth error page by switching to the OpenAI auth bridge', async () => {
+  const signupButton = {
+    textContent: '免费注册',
+    getBoundingClientRect() {
+      return { width: 240, height: 52 };
+    },
+  };
+  const loginButton = {
+    textContent: '登录',
+    getBoundingClientRect() {
+      return { width: 240, height: 52 };
+    },
+  };
+  const emailInput = {
+    value: '',
+    type: 'email',
+    getAttribute(name) {
+      if (name === 'type') return 'email';
+      return null;
+    },
+    getBoundingClientRect() {
+      return { width: 280, height: 44 };
+    },
+  };
+  const clickedTargets = [];
+
+  const context = createContext({
+    href: 'https://chatgpt.com/auth/login?callbackUrl=%2F&screen_hint=signup',
+    bodyText: '开始使用 免费注册',
+    waitForElementByTextImpl(_selector, pattern) {
+      if (
+        /https:\/\/auth\.openai\.com\/log-in-or-create-account/i.test(context.location.href)
+        && /登录|log\s*in|continue/i.test(String(pattern))
+      ) {
+        return Promise.resolve(loginButton);
+      }
+      return Promise.reject(new Error('missing'));
+    },
+    querySelectorImpl(selector) {
+      if (selector === '[data-testid="signup-button"]' && /chatgpt\.com\/auth\/login/i.test(context.location.href)) {
+        return signupButton;
+      }
+      return null;
+    },
+    querySelectorAllImpl(selector) {
+      if (/^input/.test(selector) && /auth\.openai\.com\/u\/signup\/identifier/i.test(context.location.href)) {
+        return [emailInput];
+      }
+      return [];
+    },
+  });
+
+  let currentHref = context.location.href;
+  Object.defineProperty(context.location, 'href', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return currentHref;
+    },
+    set(value) {
+      currentHref = String(value || '');
+      if (/chatgpt\.com\/api\/auth\/error/i.test(currentHref)) {
+        context.document.body.innerText = '';
+        return;
+      }
+      if (/auth\.openai\.com\/log-in-or-create-account/i.test(currentHref)) {
+        context.document.body.innerText = '你的会话已结束 登录以继续，或在不登录的情况下使用 ChatGPT.com';
+        return;
+      }
+      if (/auth\.openai\.com\/u\/signup\/identifier/i.test(currentHref)) {
+        context.document.body.innerText = '';
+        return;
+      }
+      context.document.body.innerText = '开始使用 免费注册';
+    },
+  });
+
+  context.simulateClick = (target) => {
+    clickedTargets.push(target);
+    if (target === signupButton) {
+      context.location.href = 'https://chatgpt.com/api/auth/error';
+      return;
+    }
+    if (target === loginButton) {
+      context.location.href = 'https://auth.openai.com/u/signup/identifier';
+    }
+  };
+
+  loadSignupPage(context);
+
+  const listener = context.__listeners[0];
+  assert.ok(listener, 'expected signup-page to register a runtime listener');
+
+  const response = await new Promise((resolve, reject) => {
+    const keepAlive = listener(
+      { type: 'EXECUTE_STEP', step: 2, payload: { signupEntry: 'chatgpt' } },
+      {},
+      (result) => resolve(result)
+    );
+    assert.equal(keepAlive, true);
+    setTimeout(() => reject(new Error('timeout waiting for response')), 3000);
+  });
+
+  assert.equal(response?.ok, true);
+  assert.deepEqual(clickedTargets, [signupButton, loginButton]);
+  assert.equal(context.location.href, 'https://auth.openai.com/u/signup/identifier');
+  assert.deepEqual(context.__errors, []);
+  assert.deepEqual(context.__completions, [
+    {
+      step: 2,
+      payload: undefined,
+    },
+  ]);
+});
+
 test('step 2 logs out first when platform login redirects into an already-signed-in chat session', async () => {
   const state = {
     menuOpen: false,

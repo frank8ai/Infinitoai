@@ -120,6 +120,23 @@ test('step 2 has an auth-page-ready fallback when the completion signal is lost 
   );
 });
 
+test('step 2 chatgpt auth-error fallback reopens the direct OpenAI auth bridge', () => {
+  const backgroundSource = readProjectFile('background.js');
+
+  assert.match(
+    backgroundSource,
+    /const CHATGPT_AUTH_BRIDGE_URL = 'https:\/\/auth\.openai\.com\/log-in-or-create-account';/i
+  );
+  assert.match(
+    backgroundSource,
+    /function isStep2ChatgptAuthErrorPageState\(pageState = \{\}\) \{[\s\S]*chatgpt\.com\/api\/auth\/error/i
+  );
+  assert.match(
+    backgroundSource,
+    /ChatGPT 注册入口落到了 auth error 页面[\s\S]*entryUrlOverride:\s*CHATGPT_AUTH_BRIDGE_URL/i
+  );
+});
+
 test('step 2 navigation fallback replays the signup step when the page is still stuck on the platform signing bridge', () => {
   const backgroundSource = readProjectFile('background.js');
 

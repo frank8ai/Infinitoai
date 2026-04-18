@@ -282,13 +282,38 @@ async function waitForChatgptSignupAdvance(timeout = 15000) {
 
   while (Date.now() - start < timeout) {
     throwIfStopped();
+    const visibleText = getVisiblePageText();
 
     if (isDirectSignupFormVisible({ signupEntry: 'chatgpt' })) {
       return true;
     }
 
-    if (isSignupContextUrl(location.href) || isAuthLoginEntryPage(location.href)) {
+    if (isStep2ChatgptRecoveredAuthReady(visibleText, location.href)) {
       return true;
+    }
+
+    if (isCreateAccountSessionEndedPage(visibleText, location.href)) {
+      const loginEntryButton = await waitForElementByText(
+        'a, button, [role="button"], [role="link"]',
+        /登录|log\s*in|continue|继续/i,
+        2000
+      ).catch(() => null);
+
+      if (loginEntryButton) {
+        await humanPause(350, 900);
+        simulateClick(loginEntryButton);
+        log('第 2 步：OpenAI 注册桥页打开了会话结束页，已点击主继续/登录按钮。', 'warn');
+        await sleep(500);
+        continue;
+      }
+    }
+
+    if (!forcedAuthBridge && isChatgptAuthErrorPage(location.href)) {
+      forcedAuthBridge = true;
+      location.href = CHATGPT_AUTH_BRIDGE_URL;
+      log(`第 2 步：ChatGPT 注册入口落到了 auth error 页面，已改为直接打开 ${CHATGPT_AUTH_BRIDGE_URL}。`, 'warn');
+      await sleep(250);
+      continue;
     }
 
     if (!retriedClick && Date.now() - start >= 3000 && isChatgptLoginEntryPage()) {
@@ -803,8 +828,8 @@ function isDirectSignupFormVisible(options = {}) {
   return hasVisibleCredentialInput();
 }
 
-function isCreateAccountSessionEndedPage(text = getVisiblePageText()) {
-  if (!/create-account/i.test(location.href)) {
+function isCreateAccountSessionEndedPage(text = getVisiblePageText(), url = location.href) {
+  if (!/(?:create-account|log-in-or-create-account)/i.test(String(url || ''))) {
     return false;
   }
 
@@ -813,6 +838,26 @@ function isCreateAccountSessionEndedPage(text = getVisiblePageText()) {
 
 function isAuthLoginEntryPage(url = location.href) {
   return /(?:auth|accounts)\.openai\.com\/log-?in(?:[/?#]|$)/i.test(String(url || ''));
+}
+
+function isChatgptAuthErrorPage(url = location.href) {
+  return /chatgpt\.com\/api\/auth\/error(?:[/?#]|$)/i.test(String(url || ''));
+}
+
+function isStep2ChatgptRecoveredAuthReady(text = getVisiblePageText(), url = location.href) {
+  if (isAuthLoginEntryPage(url)) {
+    return hasVisibleCredentialInput();
+  }
+
+  if (/(?:auth|accounts)\.openai\.com\/(?:u\/signup\/|create-account)/i.test(String(url || ''))) {
+    return hasVisibleCredentialInput() || isStep3AlreadyAdvancedPage(text, url);
+  }
+
+  if (/(?:auth|accounts)\.openai\.com\/log-in-or-create-account/i.test(String(url || ''))) {
+    return hasVisibleCredentialInput();
+  }
+
+  return false;
 }
 
 function throwIfStep2UnexpectedAuthLoginEntry() {

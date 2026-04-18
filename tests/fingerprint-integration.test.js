@@ -99,3 +99,13 @@ test('fingerprint bridge client and local bridge service exist with roxy adapter
   assert.match(stepRunner, /runStep6/);
   assert.match(stepRunner, /runStep8/);
 });
+
+test('fingerprint step runner includes ChatGPT auth-error and auth-bridge recovery logic', () => {
+  const stepRunner = readProjectFile(path.join('bridge', 'roxy_step_runner.js'));
+
+  assert.match(stepRunner, /function isChatgptAuthErrorUrl/);
+  assert.match(stepRunner, /async function clickSessionEndedLogin/);
+  assert.match(stepRunner, /async function waitForChatgptStep2Ready/);
+  assert.match(stepRunner, /log-in-or-create-account/);
+  assert.match(stepRunner, /did not reach a usable signup\/login form/i);
+});

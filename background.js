@@ -6,6 +6,7 @@ const LOG_PREFIX = '[Infinitoai:bg]';
 const DUCK_AUTOFILL_URL = 'https://duckduckgo.com/email/settings/autofill';
 const OFFICIAL_SIGNUP_ENTRY_URL = 'https://platform.openai.com/login';
 const CHATGPT_SIGNUP_ENTRY_URL = 'https://chatgpt.com/auth/login?callbackUrl=%2F&screen_hint=signup';
+const CHATGPT_AUTH_BRIDGE_URL = 'https://auth.openai.com/log-in-or-create-account';
 const STOP_ERROR_MESSAGE = 'Flow stopped by user.';
 const AUTO_RUN_HANDOFF_MESSAGE = 'Auto run handed off to manual continuation.';
 const HUMAN_STEP_DELAY_MIN = 700;
@@ -4308,6 +4309,11 @@ function isStep2ChatgptEntryPageState(pageState = {}) {
     && !pageState?.hasVisibleProfileFormInput;
 }
 
+function isStep2ChatgptAuthErrorPageState(pageState = {}) {
+  const url = String(pageState?.url || '').trim();
+  return /chatgpt\.com\/api\/auth\/error(?:[/?#]|$)/i.test(url);
+}
+
 function isStep2UnexpectedAuthLoginPageState(pageState = {}) {
   const url = String(pageState?.url || '').trim();
   return /(?:auth|accounts)\.openai\.com\/log-?in(?:[/?#]|$)/i.test(url)
@@ -4339,7 +4345,8 @@ async function executeStep2(state, options = {}) {
   }
 
   await addLog(`第 2 步：正在打开${getSignupEntryLabel(state)}...`);
-  await reuseOrCreateTab('signup-page', getSignupEntryUrl(state), {
+  const entryUrl = String(options?.entryUrlOverride || getSignupEntryUrl(state) || '').trim() || getSignupEntryUrl(state);
+  await reuseOrCreateTab('signup-page', entryUrl, {
     reuseActiveTabOnCreate: true,
     reloadIfSameUrl: replayedAfterNavigationInterrupt,
   });
@@ -4414,6 +4421,25 @@ async function waitForStep2CompletionSignalOrAuthPageReady(initialState = {}) {
     }
 
     const elapsedMs = Date.now() - start;
+    if (currentSignupEntry === 'chatgpt' && isStep2ChatgptAuthErrorPageState(pageState)) {
+      if (!step2NavigationReplayAttempted) {
+        step2NavigationReplayAttempted = true;
+        await addLog(
+          '第 2 步：ChatGPT 注册入口落到了 auth error 页面，改为直接打开 OpenAI 注册桥页再试一次。',
+          'warn'
+        );
+        await executeStep2(currentState, {
+          replayedAfterNavigationInterrupt: true,
+          entryUrlOverride: CHATGPT_AUTH_BRIDGE_URL,
+        });
+        return;
+      }
+
+      throw new Error(
+        'Step 2 blocked: ChatGPT signup entry fell onto chatgpt.com/api/auth/error before the OpenAI signup flow became available.'
+      );
+    }
+
     if (currentSignupEntry === 'chatgpt' && isStep2ChatgptEntryPageState(pageState)) {
       if (!step2NavigationReplayAttempted && elapsedMs >= 3000) {
         step2NavigationReplayAttempted = true;

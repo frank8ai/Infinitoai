@@ -53,12 +53,71 @@ function isChatgptEntryUrl(url = '') {
   return /chatgpt\.com\/auth\/login/i.test(String(url || ''));
 }
 
+function isChatgptAuthErrorUrl(url = '') {
+  return /chatgpt\.com\/api\/auth\/error/i.test(String(url || ''));
+}
+
 function isAuthUrl(url = '') {
   return /(?:auth|accounts)\.openai\.com\//i.test(String(url || ''));
 }
 
 function isLocalhostUrl(url = '') {
   return /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?\/auth\/callback/i.test(String(url || ''));
+}
+
+async function hasVisibleCredentialInput(page) {
+  for (const selector of [
+    'input[name="email"]',
+    'input[type="email"]',
+    'input[name="username"]',
+    'input[autocomplete="username"]',
+    'input[type="password"]',
+  ]) {
+    const locator = page.locator(selector).first();
+    try {
+      if (await locator.isVisible({ timeout: 300 })) {
+        return true;
+      }
+    } catch {}
+  }
+  return false;
+}
+
+async function pageText(page) {
+  try {
+    return await page.locator('body').innerText({ timeout: 1000 });
+  } catch {
+    return '';
+  }
+}
+
+async function clickSessionEndedLogin(page, events) {
+  const text = await pageText(page);
+  if (!/session has ended|你的会话已结束|登录以继续|log in to continue|セッションが終了しました|ログインして続行/i.test(text)) {
+    return false;
+  }
+  let clicked = await clickAnyVisible(page, [
+    'a:has-text("登录")',
+    'a:has-text("Log in")',
+    'button:has-text("登录")',
+    'button:has-text("Log in")',
+    'a:has-text("继续")',
+    'button:has-text("Continue")',
+  ], 3000);
+  if (!clicked) {
+    try {
+      const primaryAction = page.locator('a, button, [role="button"], [role="link"]').first();
+      if (await primaryAction.isVisible({ timeout: 1000 })) {
+        await primaryAction.click({ timeout: 2000 });
+        clicked = true;
+      }
+    } catch {}
+  }
+  if (clicked) {
+    appendEvent(events, 'warn', '指纹浏览器桥页落到了会话结束页，已点击主登录/继续按钮。', 2);
+    await sleep(1000);
+  }
+  return clicked;
 }
 
 async function waitForVisible(page, selectors, timeout = 10000) {
@@ -128,6 +187,66 @@ async function waitForUrlOrVisibleInput(page, options = {}) {
   return page.url();
 }
 
+async function waitForChatgptStep2Ready(page, events, timeout = 20000) {
+  const startedAt = Date.now();
+  let retriedClick = false;
+  let forcedAuthBridge = false;
+  const authBridgeUrl = 'https://auth.openai.com/log-in-or-create-account';
+
+  while (Date.now() - startedAt < timeout) {
+    const url = page.url();
+
+    if (isAuthUrl(url) || isLocalhostUrl(url) || /platform\.openai\.com\/login/i.test(url)) {
+      if (await clickSessionEndedLogin(page, events)) {
+        await sleep(500);
+        continue;
+      }
+      if (await hasVisibleCredentialInput(page) || /create-account|u\/signup|u\/login\/identifier/i.test(url)) {
+        return url;
+      }
+    }
+
+    if (await hasVisibleCredentialInput(page)) {
+      return url;
+    }
+
+    if (!retriedClick && Date.now() - startedAt >= 3000 && isChatgptEntryUrl(url)) {
+      retriedClick = await clickAnyVisible(page, [
+        '[data-testid="signup-button"]',
+        'button:has-text("免费注册")',
+        'button:has-text("Sign up")',
+        'a:has-text("免费注册")',
+        'a:has-text("Sign up")',
+      ], 2000);
+      if (retriedClick) {
+        appendEvent(events, 'warn', '指纹浏览器 ChatGPT 注册入口仍未推进，已再次点击 Sign up。', 2);
+        await sleep(1000);
+        continue;
+      }
+    }
+
+    if (!forcedAuthBridge && (isChatgptAuthErrorUrl(url) || /chrome-error:\/\//i.test(url))) {
+      forcedAuthBridge = true;
+      appendEvent(events, 'warn', `指纹浏览器注册入口落到了错误页，已改为直接打开 ${authBridgeUrl}。`, 2);
+      await page.goto(authBridgeUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await sleep(1000);
+      continue;
+    }
+
+    if (!forcedAuthBridge && Date.now() - startedAt >= 6000 && isChatgptEntryUrl(url)) {
+      forcedAuthBridge = true;
+      appendEvent(events, 'warn', `指纹浏览器 ChatGPT 注册入口仍未推进，已改为直接打开 ${authBridgeUrl}。`, 2);
+      await page.goto(authBridgeUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await sleep(1000);
+      continue;
+    }
+
+    await sleep(250);
+  }
+
+  throw new Error(`Fingerprint step 2 did not reach a usable signup/login form. URL: ${page.url()}`);
+}
+
 async function runStep2(page, payload, events) {
   const entryUrl = String(
     payload.entryUrl
@@ -150,7 +269,9 @@ async function runStep2(page, payload, events) {
     ], 10000);
   }
 
-  const url = await waitForUrlOrVisibleInput(page, { timeout: 20000 });
+  const url = payload.signupEntry === 'chatgpt'
+    ? await waitForChatgptStep2Ready(page, events, 20000)
+    : await waitForUrlOrVisibleInput(page, { timeout: 20000 });
   appendEvent(events, 'ok', `指纹浏览器注册入口已就绪：${url}`, 2);
   return {
     status: 'completed',
