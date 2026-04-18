@@ -5873,6 +5873,17 @@ async function executeStep4(state) {
     return;
   }
 
+  if (isFingerprintBrowserBackend(state)) {
+    await addLog('第 4 步：正在为指纹浏览器轮询注册验证码并提交...', 'info');
+    await executeVerificationMailStep(4, state, {
+      filterAfterTimestamp: state.flowStartTime || 0,
+      ...getTmailorVerificationProfile(4),
+      resendAfterAttempts: 3,
+      persistLastEmailTimestamp: true,
+    });
+    return;
+  }
+
   const effectiveState = await ensureSignupPageReadyForVerification(state, 4);
   await executeVerificationMailStep(4, effectiveState, {
     filterAfterTimestamp: effectiveState.flowStartTime || 0,
@@ -6330,6 +6341,17 @@ async function waitForStep6CompletionSignalOrRecoveredAuthState() {
 // ============================================================
 
 async function executeStep7(state) {
+  if (isFingerprintBrowserBackend(state)) {
+    await addLog('第 7 步：正在为指纹浏览器轮询登录验证码并提交...', 'info');
+    await executeVerificationMailStep(7, state, {
+      filterAfterTimestamp: state.lastEmailTimestamp || state.flowStartTime || 0,
+      ...getTmailorVerificationProfile(7),
+      resendAfterAttempts: 3,
+      persistLastEmailTimestamp: false,
+    });
+    return;
+  }
+
   const effectiveState = await ensureSignupPageReadyForVerification(state, 7);
   await executeVerificationMailStep(7, effectiveState, {
     filterAfterTimestamp: effectiveState.lastEmailTimestamp || effectiveState.flowStartTime || 0,

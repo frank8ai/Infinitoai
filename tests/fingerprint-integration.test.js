@@ -53,8 +53,10 @@ test('background includes fingerprint bridge lifecycle helpers and step dispatch
   assert.match(backgroundSource, /async function deleteFingerprintBridgeRunIfNeeded\(state = null\)/);
   assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*completeFingerprintBridgeStep\(2,\s*state/i);
   assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*completeFingerprintBridgeStep\(3,\s*state/i);
+  assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*executeVerificationMailStep\(4,\s*state/i);
   assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*completeFingerprintBridgeStep\(5,\s*state/i);
   assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*completeFingerprintBridgeStep\(6,\s*state/i);
+  assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*executeVerificationMailStep\(7,\s*state/i);
   assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*completeFingerprintBridgeStep\(8,\s*state/i);
 });
 
