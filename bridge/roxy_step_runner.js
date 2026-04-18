@@ -65,6 +65,10 @@ function isLocalhostUrl(url = '') {
   return /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?\/auth\/callback/i.test(String(url || ''));
 }
 
+function isChatgptLoginWithUrl(url = '') {
+  return /chatgpt\.com\/auth\/login_with/i.test(String(url || ''));
+}
+
 async function hasVisibleCredentialInput(page) {
   for (const selector of [
     'input[name="email"]',
@@ -89,6 +93,26 @@ async function pageText(page) {
   } catch {
     return '';
   }
+}
+
+async function pageHtml(page) {
+  try {
+    return await page.content();
+  } catch {
+    return '';
+  }
+}
+
+async function isChatgptChallengePage(page) {
+  const url = page.url();
+  if (!isChatgptLoginWithUrl(url)) {
+    return false;
+  }
+  const text = await pageText(page);
+  const html = await pageHtml(page);
+  return /__cf_chl_rt_tk=|cdn-cgi\/challenge-platform|enable javascript and cookies to continue|please wait|请稍候/i.test(
+    `${String(url || '')}\n${String(text || '')}\n${String(html || '')}`
+  );
 }
 
 async function clickSessionEndedLogin(page, events) {
@@ -192,6 +216,7 @@ async function waitForChatgptStep2Ready(page, events, timeout = 20000) {
   let retriedClick = false;
   let forcedAuthBridge = false;
   const authBridgeUrl = 'https://auth.openai.com/log-in-or-create-account';
+  const directAuthReadyUrlPattern = /(?:auth|accounts)\.openai\.com\/(?:u\/signup(?:[/?#]|$)|u\/login\/identifier(?:[/?#]|$)|create-account(?:[/?#]|$))/i;
 
   while (Date.now() - startedAt < timeout) {
     const url = page.url();
@@ -201,7 +226,7 @@ async function waitForChatgptStep2Ready(page, events, timeout = 20000) {
         await sleep(500);
         continue;
       }
-      if (await hasVisibleCredentialInput(page) || /create-account|u\/signup|u\/login\/identifier/i.test(url)) {
+      if (await hasVisibleCredentialInput(page) || directAuthReadyUrlPattern.test(url)) {
         return url;
       }
     }
@@ -239,6 +264,10 @@ async function waitForChatgptStep2Ready(page, events, timeout = 20000) {
       await page.goto(authBridgeUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await sleep(1000);
       continue;
+    }
+
+    if (await isChatgptChallengePage(page)) {
+      throw new Error(`Fingerprint step 2 blocked: ChatGPT login_with is currently gated by a Cloudflare challenge. URL: ${page.url()}`);
     }
 
     await sleep(250);
@@ -288,24 +317,34 @@ async function runStep3(page, payload, events) {
     throw new Error('Fingerprint step 3 requires email and password.');
   }
 
-  const emailInput = await waitForVisible(page, [
-    'input[name="email"]',
-    'input[type="email"]',
-    'input[name="username"]',
-    'input[autocomplete="username"]',
-  ], 15000);
-  await fillInput(emailInput, email);
-  appendEvent(events, 'info', '指纹浏览器已填写注册邮箱。', 3);
-  await clickAnyVisible(page, [
-    'button[type="submit"]',
-    'button[name="intent"][value="email"]',
-  ], 5000);
-  await sleep(1000);
-
-  const passwordInput = await waitForVisible(page, [
+  let passwordInput = await waitForVisible(page, [
+    'input[name="new-password"]',
     'input[type="password"]',
     'input[name="password"]',
-  ], 15000);
+  ], 1500).catch(() => null);
+
+  if (!passwordInput) {
+    const emailInput = await waitForVisible(page, [
+      'input[name="email"]',
+      'input[type="email"]',
+      'input[name="username"]',
+      'input[autocomplete="username"]',
+    ], 15000);
+    await fillInput(emailInput, email);
+    appendEvent(events, 'info', '指纹浏览器已填写注册邮箱。', 3);
+    await clickAnyVisible(page, [
+      'button[name="intent"][value="email"]',
+      'button[type="submit"]',
+    ], 5000);
+    await sleep(1000);
+
+    passwordInput = await waitForVisible(page, [
+      'input[name="new-password"]',
+      'input[type="password"]',
+      'input[name="password"]',
+    ], 15000);
+  }
+
   await fillInput(passwordInput, password);
   appendEvent(events, 'info', '指纹浏览器已填写注册密码。', 3);
   await clickAnyVisible(page, ['button[type="submit"]'], 5000);

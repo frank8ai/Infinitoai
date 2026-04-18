@@ -1860,6 +1860,77 @@ test('step 2 recovers from the ChatGPT auth error page by switching to the OpenA
   ]);
 });
 
+test('step 2 fails fast when chatgpt login_with is gated by a challenge page', async () => {
+  const signupButton = {
+    textContent: '免费注册',
+    getBoundingClientRect() {
+      return { width: 240, height: 52 };
+    },
+  };
+  const context = createContext({
+    href: 'https://chatgpt.com/auth/login?callbackUrl=%2F&screen_hint=signup',
+    bodyText: '开始使用 免费注册',
+    querySelectorImpl(selector) {
+      if (selector === '[data-testid="signup-button"]' && /chatgpt\.com\/auth\/login/i.test(currentHref)) {
+        return signupButton;
+      }
+      return null;
+    },
+    querySelectorAllImpl(selector) {
+      if (selector === '[data-testid="signup-button"]' && /chatgpt\.com\/auth\/login/i.test(currentHref)) {
+        return [signupButton];
+      }
+      return [];
+    },
+  });
+  context.document.documentElement = {
+    innerHTML: '<div class="challenge"><script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1"></script></div>',
+  };
+  context.document.body.innerHTML = '<div class="challenge">please wait</div>';
+
+  let currentHref = context.location.href;
+  Object.defineProperty(context.location, 'href', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return currentHref;
+    },
+    set(value) {
+      currentHref = String(value || '');
+      if (/chatgpt\.com\/auth\/login_with/i.test(currentHref)) {
+        context.document.body.innerText = '请稍候';
+        context.document.body.innerHTML = '<div class="challenge">please wait<script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1"></script></div>';
+        return;
+      }
+      context.document.body.innerText = '开始使用 免费注册';
+      context.document.body.innerHTML = '<div>signup entry</div>';
+    },
+  });
+
+  context.simulateClick = (target) => {
+    if (target === signupButton) {
+      context.location.href = 'https://chatgpt.com/auth/login_with?callbackUrl=%2F&screen_hint=signup&__cf_chl_rt_tk=demo';
+    }
+  };
+
+  loadSignupPage(context);
+
+  const listener = context.__listeners[0];
+  assert.ok(listener, 'expected signup-page to register a runtime listener');
+
+  const response = await new Promise((resolve, reject) => {
+    const keepAlive = listener(
+      { type: 'EXECUTE_STEP', step: 2, payload: { signupEntry: 'chatgpt' } },
+      {},
+      (result) => resolve(result)
+    );
+    assert.equal(keepAlive, true);
+    setTimeout(() => reject(new Error('timeout waiting for response')), 3000);
+  });
+
+  assert.match(response?.error || '', /Cloudflare challenge/i);
+});
+
 test('step 2 logs out first when platform login redirects into an already-signed-in chat session', async () => {
   const state = {
     menuOpen: false,

@@ -253,6 +253,28 @@ function isChatgptLoginEntryPage(url = location.href) {
   return /chatgpt\.com\/auth\/login/i.test(String(url || ''));
 }
 
+function isChatgptLoginWithPage(url = location.href) {
+  return /chatgpt\.com\/auth\/login_with/i.test(String(url || ''));
+}
+
+function getDocumentHtml() {
+  try {
+    return String(document.documentElement?.innerHTML || document.body?.innerHTML || '');
+  } catch {
+    return '';
+  }
+}
+
+function isChatgptChallengePage(text = getVisiblePageText(), url = location.href, html = getDocumentHtml()) {
+  if (!isChatgptLoginWithPage(url)) {
+    return false;
+  }
+
+  return /__cf_chl_rt_tk=|cdn-cgi\/challenge-platform|enable javascript and cookies to continue|请稍候|please wait/i.test(
+    `${String(text || '')}\n${String(html || '')}\n${String(url || '')}`
+  );
+}
+
 function findVisibleChatgptSignupButton() {
   const dataTestIdButton = document.querySelector('[data-testid="signup-button"]');
   if (dataTestIdButton && isElementVisible(dataTestIdButton)) {
@@ -306,6 +328,12 @@ async function waitForChatgptSignupAdvance(timeout = 15000) {
         await sleep(500);
         continue;
       }
+    }
+
+    if (isChatgptChallengePage(visibleText, location.href)) {
+      throw new Error(
+        `Step 2 blocked: ChatGPT login_with is currently gated by a Cloudflare challenge. URL: ${location.href}`
+      );
     }
 
     if (!forcedAuthBridge && isChatgptAuthErrorPage(location.href)) {

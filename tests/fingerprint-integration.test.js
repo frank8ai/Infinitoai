@@ -104,8 +104,14 @@ test('fingerprint step runner includes ChatGPT auth-error and auth-bridge recove
   const stepRunner = readProjectFile(path.join('bridge', 'roxy_step_runner.js'));
 
   assert.match(stepRunner, /function isChatgptAuthErrorUrl/);
+  assert.match(stepRunner, /function isChatgptLoginWithUrl/);
+  assert.match(stepRunner, /async function isChatgptChallengePage/);
   assert.match(stepRunner, /async function clickSessionEndedLogin/);
   assert.match(stepRunner, /async function waitForChatgptStep2Ready/);
+  assert.match(stepRunner, /const directAuthReadyUrlPattern = /);
+  assert.match(stepRunner, /input\[name="new-password"\]/);
+  assert.match(stepRunner, /button\[name="intent"\]\[value="email"\]/);
   assert.match(stepRunner, /log-in-or-create-account/);
+  assert.match(stepRunner, /Cloudflare challenge/i);
   assert.match(stepRunner, /did not reach a usable signup\/login form/i);
 });
