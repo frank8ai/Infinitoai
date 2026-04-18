@@ -10,6 +10,8 @@ function readProjectFile(relativePath) {
 test('manifest injects the auth bundle on chatgpt.com as well as the existing OpenAI auth domains', () => {
   const manifest = JSON.parse(readProjectFile('manifest.json'));
   assert.ok(manifest.host_permissions.includes('https://chatgpt.com/*'));
+  assert.ok(manifest.host_permissions.includes('http://127.0.0.1/*'));
+  assert.ok(manifest.host_permissions.includes('http://localhost/*'));
 
   const authBundleEntry = manifest.content_scripts.find((entry) =>
     Array.isArray(entry.matches) && entry.matches.includes('https://chatgpt.com/*')
