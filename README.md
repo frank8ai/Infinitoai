@@ -131,9 +131,9 @@ Step 1 和 Step 9 都依赖这个地址。
 
 当 `Source = CloudMail` 时，需要填写：
 
-- `API`：CloudMail Worker 地址，例如 `https://temp-email-api.example.com`
+- `API`：CloudMail Worker 地址，例如 `https://temp-email-api.bitpowerhub.com`
 - `Password`：CloudMail admin 密码
-- `Domains`：可用邮箱域名，多个域名用英文逗号分隔
+- `Domains`：可用邮箱域名，多个域名用英文逗号分隔。默认预设已切到你自己的域名池，例如 `beta.bitpowerhub.com, assets.bitpowerhub.com, docs.finchaintalk.com, alpha.yzw.io, alpha.tokenflowpay.com`
 - `Subdomain`：可选；填写后会生成 `name@subdomain.domain` 形式的邮箱
 - `Random subdomain`：可选；开启后会把 `Domains` 里的域名当作“基础域名”，交给 CloudMail Worker 自动分配随机四级子域，例如 `name@abc123.alpha.yzw.io`
 

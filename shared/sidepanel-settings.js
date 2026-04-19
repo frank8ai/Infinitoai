@@ -16,6 +16,10 @@
   const DEFAULT_BROWSER_BACKEND = 'extension';
   const DEFAULT_FINGERPRINT_PROVIDER = 'roxy';
   const DEFAULT_ROXY_API_BASE_URL = 'http://127.0.0.1:50000';
+  const DEFAULT_CLOUDMAIL_BASE_URL = 'https://temp-email-api.bitpowerhub.com';
+  const DEFAULT_CLOUDMAIL_DOMAINS = 'beta.bitpowerhub.com, assets.bitpowerhub.com, docs.finchaintalk.com, alpha.yzw.io, alpha.tokenflowpay.com';
+  const DEFAULT_CLOUDMAIL_SUBDOMAIN = '';
+  const DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN = true;
   const PERSISTED_TOP_SETTING_KEYS = [
     'vpsUrl',
     'signupEntry',
@@ -102,6 +106,20 @@
     return value === 'roxy' ? 'roxy' : DEFAULT_FINGERPRINT_PROVIDER;
   }
 
+  function sanitizePresetString(value, defaultValue = '') {
+    if (typeof value !== 'string') {
+      return defaultValue;
+    }
+    return value.trim() ? value : defaultValue;
+  }
+
+  function sanitizeCloudMailEnableRandomSubdomain(value) {
+    if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
+      return DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN;
+    }
+    return sanitizeAutoRotateMailProvider(value);
+  }
+
   function normalizeEmailDomain(domain) {
     return String(domain || '').trim().replace(/^@+/, '').toLowerCase();
   }
@@ -130,12 +148,12 @@
       mailDomainSettings: normalizeMailDomainSettings(value.mailDomainSettings),
       inbucketHost: typeof value.inbucketHost === 'string' ? value.inbucketHost : '',
       inbucketMailbox: typeof value.inbucketMailbox === 'string' ? value.inbucketMailbox : '',
-      cloudMailBaseUrl: typeof value.cloudMailBaseUrl === 'string' ? value.cloudMailBaseUrl : '',
+      cloudMailBaseUrl: sanitizePresetString(value.cloudMailBaseUrl, DEFAULT_CLOUDMAIL_BASE_URL),
       cloudMailAdminEmail: typeof value.cloudMailAdminEmail === 'string' ? value.cloudMailAdminEmail : '',
       cloudMailAdminPassword: typeof value.cloudMailAdminPassword === 'string' ? value.cloudMailAdminPassword : '',
-      cloudMailDomains: typeof value.cloudMailDomains === 'string' ? value.cloudMailDomains : '',
-      cloudMailSubdomain: typeof value.cloudMailSubdomain === 'string' ? value.cloudMailSubdomain : '',
-      cloudMailEnableRandomSubdomain: sanitizeAutoRotateMailProvider(value.cloudMailEnableRandomSubdomain),
+      cloudMailDomains: sanitizePresetString(value.cloudMailDomains, DEFAULT_CLOUDMAIL_DOMAINS),
+      cloudMailSubdomain: typeof value.cloudMailSubdomain === 'string' ? value.cloudMailSubdomain : DEFAULT_CLOUDMAIL_SUBDOMAIN,
+      cloudMailEnableRandomSubdomain: sanitizeCloudMailEnableRandomSubdomain(value.cloudMailEnableRandomSubdomain),
       oauthBackend: sanitizeOAuthBackend(value.oauthBackend),
       codex2ApiBaseUrl: typeof value.codex2ApiBaseUrl === 'string' ? value.codex2ApiBaseUrl : '',
       codex2ApiAdminKey: typeof value.codex2ApiAdminKey === 'string' ? value.codex2ApiAdminKey : '',
@@ -221,6 +239,10 @@
     DEFAULT_AUTO_RUN_INFINITE,
     DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
     DEFAULT_BROWSER_BACKEND,
+    DEFAULT_CLOUDMAIL_BASE_URL,
+    DEFAULT_CLOUDMAIL_DOMAINS,
+    DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN,
+    DEFAULT_CLOUDMAIL_SUBDOMAIN,
     DEFAULT_EMAIL_SOURCE,
     DEFAULT_FINGERPRINT_PROVIDER,
     DEFAULT_ROXY_API_BASE_URL,
