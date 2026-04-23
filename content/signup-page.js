@@ -1315,11 +1315,11 @@ function hasProfileContextText(text = getVisiblePageText()) {
 }
 
 function isCanonicalEmailVerificationPage(url = location.href) {
-  return /(?:auth|accounts)\.openai\.com\/(?:account\/)?email-verification/i.test(String(url || ''));
+  return /(?:auth|accounts)\.openai\.com\/(?:(?:account|u\/signup)\/)?email-verification/i.test(String(url || ''));
 }
 
 function isCanonicalAboutYouPage(url = location.href) {
-  return /(?:auth|accounts)\.openai\.com\/about-you/i.test(String(url || ''));
+  return /(?:auth|accounts)\.openai\.com\/(?:u\/signup\/)?about-you/i.test(String(url || ''));
 }
 
 function isStep3AlreadyAdvancedPage(text = getVisiblePageText(), url = location.href) {
@@ -1879,7 +1879,15 @@ async function waitForStep3CredentialSubmissionOutcome(startUrl, timeout = 8000)
       throw new Error(getUnsupportedEmailBlockedMessage(3));
     }
 
-    if (location.href !== startUrl || hasVisibleVerificationInput() || hasVisibleProfileFormInput() || !hasVisibleCredentialInput()) {
+    const advancedToReadyVerification = hasVisibleVerificationInput() || hasReadyVerificationPage(visibleText);
+    const advancedToReadyProfile = hasVisibleProfileFormInput() || hasReadyProfilePage(visibleText);
+    const advancedToStableLanding = location.href !== startUrl && (
+      (isCanonicalEmailVerificationPage(location.href) && (hasReadyVerificationPage(visibleText) || hasVerificationContextText(visibleText)))
+      || (isCanonicalAboutYouPage(location.href) && (hasReadyProfilePage(visibleText) || hasProfileContextText(visibleText)))
+      || isStablePostProfileLandingUrl(location.href)
+    );
+
+    if (advancedToReadyVerification || advancedToReadyProfile || advancedToStableLanding) {
       return {
         accepted: true,
         reason: 'page-advanced',

@@ -1169,6 +1169,94 @@ test('step 3 only completes after the password fallback submit actually advances
   );
 });
 
+test('step 3 does not complete when password submit stays on the password route without verification-page signals', async () => {
+  const emailInput = {
+    getBoundingClientRect() {
+      return { width: 220, height: 42 };
+    },
+  };
+  const passwordInput = {
+    getBoundingClientRect() {
+      return { width: 220, height: 42 };
+    },
+  };
+  const continueButton = {
+    textContent: '继续',
+    getBoundingClientRect() {
+      return { width: 240, height: 48 };
+    },
+  };
+
+  const filledValues = [];
+  const clickedTargets = [];
+  const state = {
+    passwordVisible: true,
+  };
+
+  const context = createContext({
+    href: 'https://auth.openai.com/create-account/password',
+    bodyText: '创建密码 继续',
+    waitForElementImpl(selector) {
+      if (selector.includes('type="email"') || selector.includes('name="email"')) {
+        return Promise.resolve(emailInput);
+      }
+      return Promise.reject(new Error(`missing: ${selector}`));
+    },
+    querySelectorImpl(selector) {
+      if (selector === 'button[type="submit"]' && state.passwordVisible) {
+        return continueButton;
+      }
+      return null;
+    },
+    querySelectorAllImpl(selector) {
+      if (selector === 'input[type="password"]') {
+        return state.passwordVisible ? [passwordInput] : [];
+      }
+      return [];
+    },
+  });
+  context.fillInput = (_target, value) => {
+    filledValues.push(value);
+  };
+  context.simulateClick = (target) => {
+    clickedTargets.push(target);
+    if (target === continueButton) {
+      state.passwordVisible = false;
+      context.location.href = 'https://auth.openai.com/create-account/password';
+      context.document.body.innerText = '500 Internal Server Error';
+    }
+  };
+
+  loadSignupPage(context);
+
+  const listener = context.__listeners[0];
+  assert.ok(listener, 'expected signup-page to register a runtime listener');
+
+  const response = await new Promise((resolve, reject) => {
+    const keepAlive = listener(
+      { type: 'EXECUTE_STEP', step: 3, payload: { email: 'demo@example.com', password: 'secret-pass' } },
+      {},
+      (result) => resolve(result)
+    );
+    assert.equal(keepAlive, true);
+    setTimeout(() => reject(new Error('timeout waiting for response')), 3000);
+  });
+
+  assert.equal(
+    response?.error,
+    'Step 3 blocked: password was filled but the signup page never advanced past the credential form.'
+  );
+  assert.deepEqual(filledValues, ['secret-pass']);
+  assert.deepEqual(clickedTargets, [continueButton]);
+  assert.deepEqual(context.__completions, []);
+  assert.deepEqual(context.__errors, [
+    {
+      step: 3,
+      message: response.error,
+    },
+  ]);
+});
+
 test('step 3 preserves the current account when email submit falls into the auth login password page', async () => {
   const state = {
     stage: 'email',

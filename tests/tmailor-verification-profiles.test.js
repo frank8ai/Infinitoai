@@ -24,7 +24,7 @@ test('getTmailorVerificationProfile returns the expected sender and subject filt
     getTmailorVerificationProfile(4),
     {
       senderFilters: ['openai', 'noreply', 'verify', 'auth', 'duckduckgo', 'forward'],
-      subjectFilters: ['verify', 'verification', 'code', '验证', 'confirm'],
+      subjectFilters: ['verify', 'verification', 'code', '验证', 'confirm', '認証', '確認', 'コード'],
     }
   );
 
@@ -32,7 +32,7 @@ test('getTmailorVerificationProfile returns the expected sender and subject filt
     getTmailorVerificationProfile(7),
     {
       senderFilters: ['openai', 'noreply', 'verify', 'auth', 'chatgpt', 'duckduckgo', 'forward'],
-      subjectFilters: ['verify', 'verification', 'code', '验证', 'confirm', 'login'],
+      subjectFilters: ['verify', 'verification', 'code', '验证', 'confirm', 'login', '認証', '確認', 'コード', 'ログイン'],
     }
   );
 });
@@ -41,16 +41,17 @@ test('buildManualTmailorCodeFetchConfig keeps signup code fetch permissive for t
   assert.deepEqual(
     buildManualTmailorCodeFetchConfig({
       currentStep: 4,
+      rejectedCodes: ['654321'],
       targetEmail: 'fresh@example.com',
       signupCode: '123456',
     }),
     {
       step: 4,
       senderFilters: ['openai', 'noreply', 'verify', 'auth', 'duckduckgo', 'forward'],
-      subjectFilters: ['verify', 'verification', 'code', '验证', 'confirm'],
+      subjectFilters: ['verify', 'verification', 'code', '验证', 'confirm', '認証', '確認', 'コード'],
       targetEmail: 'fresh@example.com',
       filterAfterTimestamp: 0,
-      excludeCodes: [],
+      excludeCodes: ['654321'],
       maxAttempts: 6,
       intervalMs: 2500,
     }
@@ -61,16 +62,17 @@ test('buildManualTmailorCodeFetchConfig excludes the used signup code when fetch
   assert.deepEqual(
     buildManualTmailorCodeFetchConfig({
       currentStep: 7,
+      rejectedCodes: ['654321'],
       targetEmail: 'fresh@example.com',
       signupCode: '123456',
     }),
     {
       step: 7,
       senderFilters: ['openai', 'noreply', 'verify', 'auth', 'chatgpt', 'duckduckgo', 'forward'],
-      subjectFilters: ['verify', 'verification', 'code', '验证', 'confirm', 'login'],
+      subjectFilters: ['verify', 'verification', 'code', '验证', 'confirm', 'login', '認証', '確認', 'コード', 'ログイン'],
       targetEmail: 'fresh@example.com',
       filterAfterTimestamp: 0,
-      excludeCodes: ['123456'],
+      excludeCodes: ['123456', '654321'],
       maxAttempts: 6,
       intervalMs: 2500,
     }

@@ -64,6 +64,7 @@ const {
   createAccountRecord,
   normalizeAccountRecords,
   patchAccountRecord,
+  shouldPersistAccountRecord,
   updateAccountRecordStatus,
 } = AccountRecords;
 const {
@@ -109,6 +110,7 @@ const {
   DEFAULT_AUTO_RUN_COUNT,
   DEFAULT_AUTO_RUN_INFINITE,
   DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
+  DEFAULT_ACCOUNT_SUCCESS_ONLY,
   DEFAULT_BROWSER_BACKEND,
   DEFAULT_CLOUDMAIL_ADMIN_EMAIL,
   DEFAULT_CLOUDMAIL_ADMIN_PASSWORD,
@@ -116,12 +118,18 @@ const {
   DEFAULT_CLOUDMAIL_DOMAINS,
   DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN,
   DEFAULT_CLOUDMAIL_SUBDOMAIN,
+  DEFAULT_CODEX2API_ACCOUNT_NAME,
+  DEFAULT_CODEX2API_ADMIN_KEY,
+  DEFAULT_CODEX2API_BASE_URL,
+  DEFAULT_CODEX2API_PROXY_URL,
   PERSISTED_TOP_SETTING_KEYS,
   DEFAULT_EMAIL_SOURCE: DEFAULT_PERSISTED_EMAIL_SOURCE,
   DEFAULT_FINGERPRINT_PROVIDER,
+  DEFAULT_OAUTH_BACKEND,
   DEFAULT_ROXY_API_BASE_URL,
   DEFAULT_SIGNUP_ENTRY,
   normalizePersistentSettings,
+  sanitizeAccountSuccessOnly,
   sanitizeAutoRunCount,
   sanitizeAutoRotateMailProvider,
   sanitizeBrowserBackend,
@@ -339,12 +347,15 @@ const DEFAULT_STATE = {
   lastEmailTimestamp: null,
   lastTargetEmailAcquiredAt: null,
   lastSignupVerificationCode: '',
+  rejectedSignupVerificationCodes: [],
+  rejectedLoginVerificationCodes: [],
   localhostUrl: null,
   existingAccountLogin: false,
   flowStartTime: null,
   tabRegistry: {},
   ...buildInitialLogState(),
   vpsUrl: '',
+  vpsCpaPassword: '',
   signupEntry: DEFAULT_SIGNUP_ENTRY,
   browserBackend: DEFAULT_BROWSER_BACKEND,
   fingerprintProvider: DEFAULT_FINGERPRINT_PROVIDER,
@@ -363,12 +374,13 @@ const DEFAULT_STATE = {
   cloudMailDomains: DEFAULT_CLOUDMAIL_DOMAINS,
   cloudMailSubdomain: DEFAULT_CLOUDMAIL_SUBDOMAIN,
   cloudMailEnableRandomSubdomain: DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN,
-  oauthBackend: 'vps',
-  codex2ApiBaseUrl: '',
-  codex2ApiAdminKey: '',
-  codex2ApiProxyUrl: '',
-  codex2ApiAccountName: '',
+  oauthBackend: DEFAULT_OAUTH_BACKEND,
+  codex2ApiBaseUrl: DEFAULT_CODEX2API_BASE_URL,
+  codex2ApiAdminKey: DEFAULT_CODEX2API_ADMIN_KEY,
+  codex2ApiProxyUrl: DEFAULT_CODEX2API_PROXY_URL,
+  codex2ApiAccountName: DEFAULT_CODEX2API_ACCOUNT_NAME,
   codex2ApiOAuthSessionId: '',
+  accountSuccessOnly: DEFAULT_ACCOUNT_SUCCESS_ONLY,
   autoRunCount: DEFAULT_AUTO_RUN_COUNT,
   autoRunInfinite: DEFAULT_AUTO_RUN_INFINITE,
   autoRunStats: normalizeAutoRunStats({
@@ -435,12 +447,12 @@ async function loadPersistentTmailorDomainSeeds() {
 }
 
 async function getState() {
-  const [sessionState, persistentSettings, tmailorDomainState, autoRunStats, accountRecords] = await Promise.all([
+  const persistentSettings = await getPersistentSettings();
+  const [sessionState, tmailorDomainState, autoRunStats, accountRecords] = await Promise.all([
     chrome.storage.session.get(null),
-    getPersistentSettings(),
     getPersistentTmailorDomainState(),
     getPersistentAutoRunStats(),
-    getPersistentAccountRecords(),
+    getPersistentAccountRecords({ successOnly: persistentSettings.accountSuccessOnly }),
   ]);
   return { ...DEFAULT_STATE, ...sessionState, ...persistentSettings, tmailorDomainState, autoRunStats, accountRecords };
 }
@@ -462,7 +474,7 @@ async function setState(updates) {
   await chrome.storage.session.set(updates);
 }
 
-async function getPersistentAccountRecords() {
+async function getPersistentAccountRecords(options = {}) {
   const [localState, sessionState] = await Promise.all([
     chrome.storage.local.get(ACCOUNT_RECORDS_KEY),
     chrome.storage.session.get(ACCOUNT_RECORDS_KEY),
@@ -473,7 +485,8 @@ async function getPersistentAccountRecords() {
   const mergedRecords = normalizeAccountRecords(
     localStored !== undefined
       ? localStored
-      : (sessionStored !== undefined ? sessionStored : DEFAULT_STATE.accountRecords)
+      : (sessionStored !== undefined ? sessionStored : DEFAULT_STATE.accountRecords),
+    { successOnly: options.successOnly }
   );
 
   const localStoredJson = JSON.stringify(localStored || null);
@@ -492,13 +505,17 @@ async function getPersistentAccountRecords() {
   return mergedRecords;
 }
 
-async function setPersistentAccountRecords(nextRecords) {
-  const normalizedRecords = normalizeAccountRecords(nextRecords);
+async function setPersistentAccountRecords(nextRecords, options = {}) {
+  const normalizedRecords = normalizeAccountRecords(nextRecords, { successOnly: options.successOnly });
   await Promise.all([
     chrome.storage.local.set({ [ACCOUNT_RECORDS_KEY]: normalizedRecords }),
     chrome.storage.session.set({ [ACCOUNT_RECORDS_KEY]: normalizedRecords }),
   ]);
   return normalizedRecords;
+}
+
+function isSuccessOnlyAccountRecordsEnabled(state = {}) {
+  return state.accountSuccessOnly !== false;
 }
 
 async function getPersistentAutoRunStats() {
@@ -781,6 +798,8 @@ async function setEmailState(email, options = {}) {
   await setState({
     email,
     lastSignupVerificationCode: '',
+    rejectedSignupVerificationCodes: [],
+    rejectedLoginVerificationCodes: [],
     lastTargetEmailAcquiredAt: nextTargetEmailAcquiredAt,
   });
   broadcastDataUpdate({ email, lastTargetEmailAcquiredAt: nextTargetEmailAcquiredAt });
@@ -794,6 +813,8 @@ async function setTmailorMailboxState(email, accessToken) {
     tmailorApiCaptchaCooldownUntil: 0,
     tmailorOutcomeRecorded: false,
     lastSignupVerificationCode: '',
+    rejectedSignupVerificationCodes: [],
+    rejectedLoginVerificationCodes: [],
     lastTargetEmailAcquiredAt: nextTargetEmailAcquiredAt,
   });
   broadcastDataUpdate({ email, lastTargetEmailAcquiredAt: nextTargetEmailAcquiredAt });
@@ -821,6 +842,42 @@ async function setPasswordState(password) {
   broadcastTrustedStateUpdated();
 }
 
+function normalizeRejectedVerificationCodes(codes = []) {
+  const result = [];
+  for (const code of codes || []) {
+    const normalized = String(code || '').trim();
+    if (/^\d{6}$/.test(normalized) && !result.includes(normalized)) {
+      result.push(normalized);
+    }
+  }
+  return result;
+}
+
+function getRejectedVerificationCodeStateKey(step) {
+  return Number(step) >= 7 ? 'rejectedLoginVerificationCodes' : 'rejectedSignupVerificationCodes';
+}
+
+function getRejectedVerificationCodesForStep(step, state = {}) {
+  return normalizeRejectedVerificationCodes(state?.[getRejectedVerificationCodeStateKey(step)] || []);
+}
+
+async function rememberRejectedVerificationCode(step, code) {
+  const normalized = String(code || '').trim();
+  if (!/^\d{6}$/.test(normalized)) {
+    return [];
+  }
+  const currentState = await getState();
+  const key = getRejectedVerificationCodeStateKey(step);
+  const nextCodes = normalizeRejectedVerificationCodes([...(currentState?.[key] || []), normalized]);
+  await setState({ [key]: nextCodes });
+  return nextCodes;
+}
+
+async function clearRejectedVerificationCodes(step) {
+  const key = getRejectedVerificationCodeStateKey(step);
+  await setState({ [key]: [] });
+}
+
 function findAccountRecordIndex(records, recordId) {
   if (!recordId) {
     return -1;
@@ -830,11 +887,19 @@ function findAccountRecordIndex(records, recordId) {
 
 async function createOrReuseCurrentAccountRecord(payload = {}) {
   const state = await getState();
-  const records = normalizeAccountRecords(state.accountRecords);
+  const successOnly = isSuccessOnlyAccountRecordsEnabled(state);
+  const records = normalizeAccountRecords(state.accountRecords, { successOnly });
   const email = String(payload.email || state.email || '').trim().toLowerCase();
   const password = String(payload.password || state.password || '').trim();
+  const nextStatus = payload.status === undefined ? 'pending' : payload.status;
+  const nextStatusDetail = String(payload.statusDetail || '').trim();
 
   if (!email || !password) {
+    return null;
+  }
+
+  if (successOnly && !shouldPersistAccountRecord({ status: nextStatus }, { successOnly })) {
+    await setState({ currentAccountRecordId: null });
     return null;
   }
 
@@ -851,32 +916,50 @@ async function createOrReuseCurrentAccountRecord(payload = {}) {
 
   if (
     currentIndex >= 0
-    && records[currentIndex].status === 'pending'
+    && (records[currentIndex].status === 'pending' || nextStatus === 'success')
     && records[currentIndex].email === email
     && records[currentIndex].password === password
   ) {
-    currentRecord = patchAccountRecord(records[currentIndex], basePatch);
+    currentRecord = patchAccountRecord(records[currentIndex], {
+      ...basePatch,
+      status: nextStatus,
+      statusDetail: nextStatusDetail,
+    });
     nextRecords[currentIndex] = currentRecord;
   } else {
     currentRecord = createAccountRecord({
       ...basePatch,
-      status: 'pending',
-      statusDetail: '',
+      status: nextStatus,
+      statusDetail: nextStatusDetail,
     });
     nextRecords.push(currentRecord);
   }
 
-  nextRecords = await setPersistentAccountRecords(nextRecords);
-  await setState({ currentAccountRecordId: currentRecord.id });
+  nextRecords = await setPersistentAccountRecords(nextRecords, { successOnly });
+  const nextCurrentAccountRecordId = nextRecords.some((record) => record.id === currentRecord.id)
+    ? currentRecord.id
+    : null;
+  await setState({ currentAccountRecordId: nextCurrentAccountRecordId });
   broadcastDataUpdate({ accountRecords: nextRecords });
-  return currentRecord;
+  return nextCurrentAccountRecordId ? currentRecord : null;
 }
 
 async function updateCurrentAccountRecord(updates = {}) {
   const state = await getState();
-  const records = normalizeAccountRecords(state.accountRecords);
+  const successOnly = isSuccessOnlyAccountRecordsEnabled(state);
+  const records = normalizeAccountRecords(state.accountRecords, { successOnly });
   const currentIndex = findAccountRecordIndex(records, state.currentAccountRecordId);
   if (currentIndex < 0) {
+    if (updates.status === 'success') {
+      return await createOrReuseCurrentAccountRecord({
+        email: state.email,
+        password: state.password,
+        emailSource: state.emailSource,
+        mailProvider: state.mailProvider,
+        status: updates.status,
+        statusDetail: updates.statusDetail,
+      });
+    }
     return null;
   }
 
@@ -885,9 +968,13 @@ async function updateCurrentAccountRecord(updates = {}) {
     : patchAccountRecord(records[currentIndex], updates);
   const nextRecords = records.slice();
   nextRecords[currentIndex] = nextRecord;
-  const normalizedRecords = await setPersistentAccountRecords(nextRecords);
+  const normalizedRecords = await setPersistentAccountRecords(nextRecords, { successOnly });
+  const nextCurrentAccountRecordId = normalizedRecords.some((record) => record.id === nextRecord.id)
+    ? nextRecord.id
+    : null;
+  await setState({ currentAccountRecordId: nextCurrentAccountRecordId });
   broadcastDataUpdate({ accountRecords: normalizedRecords });
-  return nextRecord;
+  return nextCurrentAccountRecordId ? nextRecord : null;
 }
 
 async function updateCurrentAccountRecordFromError(errorMessage) {
@@ -974,6 +1061,42 @@ async function getTabRegistry() {
   return await ensureTabRegistryRecovered();
 }
 
+async function closeAutoRunRoundTabs() {
+  const sourcesToClose = [
+    'signup-page',
+    'qq-mail',
+    'mail-163',
+    'duck-mail',
+    'tmailor-mail',
+    'inbucket-mail',
+  ];
+  const registry = await getTabRegistry();
+  const nextRegistry = { ...registry };
+  const tabIdsToClose = [];
+
+  for (const source of sourcesToClose) {
+    const tabId = nextRegistry[source]?.tabId;
+    if (!Number.isFinite(tabId)) {
+      delete nextRegistry[source];
+      continue;
+    }
+    tabIdsToClose.push(tabId);
+    delete nextRegistry[source];
+  }
+
+  await setState({ tabRegistry: nextRegistry });
+
+  if (!tabIdsToClose.length) {
+    return;
+  }
+
+  try {
+    await chrome.tabs.remove(tabIdsToClose);
+  } catch (err) {
+    console.warn(LOG_PREFIX, 'Failed to close prior auto-run signup/mail tabs:', err?.message || err);
+  }
+}
+
 async function registerTab(source, tabId) {
   const state = await getState();
   const registry = state.tabRegistry || {};
@@ -1012,6 +1135,16 @@ async function isTabAlive(source) {
 async function getTabId(source) {
   const registry = await ensureTabRegistryRecovered(source);
   return registry[source]?.tabId || null;
+}
+
+function isBrowserErrorPageTab(tab = {}) {
+  const url = String(tab?.url || '').trim();
+  const title = String(tab?.title || '').trim();
+  const combined = `${title} ${url}`;
+  if (!/https?:\/\/tmailor\.com/i.test(url)) {
+    return false;
+  }
+  return /无法访问此网站|this site can'?t be reached|can't reach this page|ERR_[A-Z_]+/i.test(combined);
 }
 
 function getReclaimSourceConfig(source) {
@@ -2123,6 +2256,7 @@ async function handleMessage(message, sender) {
       let nextTmailorDomainMode = undefined;
 
       if (message.payload.vpsUrl !== undefined) persistentUpdates.vpsUrl = message.payload.vpsUrl;
+      if (message.payload.vpsCpaPassword !== undefined) persistentUpdates.vpsCpaPassword = message.payload.vpsCpaPassword;
       if (message.payload.signupEntry !== undefined) persistentUpdates.signupEntry = message.payload.signupEntry;
       if (message.payload.browserBackend !== undefined) persistentUpdates.browserBackend = message.payload.browserBackend;
       if (message.payload.fingerprintProvider !== undefined) persistentUpdates.fingerprintProvider = message.payload.fingerprintProvider;
@@ -2149,6 +2283,7 @@ async function handleMessage(message, sender) {
       if (message.payload.autoRunCount !== undefined) persistentUpdates.autoRunCount = sanitizeAutoRunCount(message.payload.autoRunCount);
       if (message.payload.autoRunInfinite !== undefined) persistentUpdates.autoRunInfinite = sanitizeInfiniteAutoRun(message.payload.autoRunInfinite);
       if (message.payload.autoRotateMailProvider !== undefined) persistentUpdates.autoRotateMailProvider = sanitizeAutoRotateMailProvider(message.payload.autoRotateMailProvider);
+      if (message.payload.accountSuccessOnly !== undefined) persistentUpdates.accountSuccessOnly = sanitizeAccountSuccessOnly(message.payload.accountSuccessOnly);
       if (message.payload.tmailorDomainMode !== undefined) nextTmailorDomainMode = message.payload.tmailorDomainMode;
 
       if (Object.keys(sessionUpdates).length > 0) {
@@ -2158,6 +2293,20 @@ async function handleMessage(message, sender) {
         const nextSettings = await setPersistentSettings(persistentUpdates);
         if (persistentUpdates.mailProvider !== undefined) {
           broadcastDataUpdate({ mailProvider: nextSettings.mailProvider });
+        }
+        if (persistentUpdates.accountSuccessOnly !== undefined) {
+          const state = await getState();
+          const nextAccountRecords = await setPersistentAccountRecords(state.accountRecords, {
+            successOnly: nextSettings.accountSuccessOnly,
+          });
+          const nextCurrentAccountRecordId = nextAccountRecords.some((record) => record.id === state.currentAccountRecordId)
+            ? state.currentAccountRecordId
+            : null;
+          await setState({ currentAccountRecordId: nextCurrentAccountRecordId });
+          broadcastDataUpdate({
+            accountSuccessOnly: nextSettings.accountSuccessOnly,
+            accountRecords: nextAccountRecords,
+          });
         }
       }
       if (nextTmailorDomainMode !== undefined) {
@@ -2230,6 +2379,7 @@ async function handleMessage(message, sender) {
       const fetchConfig = buildManualTmailorCodeFetchConfig({
         currentStep: state.currentStep,
         targetEmail: state.email,
+        rejectedCodes: getRejectedVerificationCodesForStep(state.currentStep, state),
         signupCode: state.lastSignupVerificationCode,
       });
 
@@ -2840,7 +2990,7 @@ async function executeStep(step) {
 async function executeStepAndWait(step, delayAfter = 2000, recoveryState = false) {
   throwIfStopped();
   const recoveredStep1VpsPanel = Boolean(recoveryState && recoveryState !== true && recoveryState.step1VpsPanel);
-  const recoveredStep2PlatformLogin = Boolean(recoveryState && recoveryState !== true && recoveryState.step2PlatformLogin);
+  const recoveredStep2PlatformLoginRetryCount = Math.max(0, Number.parseInt(String(recoveryState?.step2PlatformLoginRetryCount ?? 0), 10) || 0);
   const recoveredStep4CredentialStall = Boolean(recoveryState && recoveryState !== true && recoveryState.step4CredentialStall);
   const recoveredStep3PlatformLoginRefreshCount = Math.max(0, Number.parseInt(String(recoveryState?.step3PlatformLoginRefreshCount ?? 0), 10) || 0);
   const recoveredStep3TimeoutRetryCount = Math.max(0, Number.parseInt(String(recoveryState?.step3TimeoutRetryCount ?? 0), 10) || 0);
@@ -2866,9 +3016,14 @@ async function executeStepAndWait(step, delayAfter = 2000, recoveryState = false
       await recoverStep1VpsPanel(err);
       return await executeStepAndWait(step, delayAfter, { step1VpsPanel: true });
     }
-    if (step === 2 && !recoveredStep2PlatformLogin && !isStopError(err)) {
-      await recoverStep2PlatformLogin(err);
-      return await executeStepAndWait(step, delayAfter, { step2PlatformLogin: true });
+    if (step === 2 && recoveredStep2PlatformLoginRetryCount < 10 && !isStopError(err)) {
+      await recoverStep2PlatformLogin(err, {
+        attempt: recoveredStep2PlatformLoginRetryCount + 1,
+        maxAttempts: 10,
+      });
+      return await executeStepAndWait(step, delayAfter, {
+        step2PlatformLoginRetryCount: recoveredStep2PlatformLoginRetryCount + 1,
+      });
     }
     if (step === 4 && !recoveredStep4CredentialStall && shouldRetryStep4WithCurrentTmailorLease(err)) {
       await replayStep2AndStep3WithCurrentTmailorLease(err);
@@ -2950,11 +3105,13 @@ async function recoverStep1VpsPanel(error) {
   });
 }
 
-async function recoverStep2PlatformLogin(error) {
+async function recoverStep2PlatformLogin(error, options = {}) {
   const message = error?.message || String(error || 'unknown step 2 error');
   const state = await getState();
+  const attempt = Math.max(1, Number.parseInt(String(options?.attempt ?? 1), 10) || 1);
+  const maxAttempts = Math.max(attempt, Number.parseInt(String(options?.maxAttempts ?? attempt), 10) || attempt);
   await addLog(
-    `第 2 步：${message} 正在重开${getSignupEntryLabel(state)}并重试一次。`,
+    `第 2 步：${message} 正在重开${getSignupEntryLabel(state)}并重试（${attempt}/${maxAttempts}）。`,
     'warn'
   );
   await reuseOrCreateTab('signup-page', getSignupEntryUrl(state), {
@@ -4000,6 +4157,7 @@ async function autoRunLoop(totalRuns, infiniteMode = false, options = {}) {
         mailProviderUsage: pruneMailProviderUsage(prevState.mailProviderUsage),
         autoRunning: true,
       };
+      await closeAutoRunRoundTabs();
       await resetState({ preserveLogHistory: true });
       await setState(keepSettings);
       await startNewLogRound(`Run ${runTargetText}`);
@@ -4343,7 +4501,6 @@ function isStep2ChatgptAuthErrorPageState(pageState = {}) {
 function isStep2UnexpectedAuthLoginPageState(pageState = {}) {
   const url = String(pageState?.url || '').trim();
   return /(?:auth|accounts)\.openai\.com\/log-?in(?:[/?#]|$)/i.test(url)
-    && Boolean(pageState?.hasVisibleCredentialInput)
     && !pageState?.hasVisibleVerificationInput
     && !pageState?.hasVisibleProfileFormInput;
 }
@@ -4502,6 +4659,7 @@ async function waitForStep2CompletionSignalOrAuthPageReady(initialState = {}) {
   }
 
   step2NavigationReplayAttempted = false;
+  throw new Error('Step 2 blocked: signup auth page did not become ready again after navigation interruption.');
 }
 
 // ============================================================
@@ -4621,6 +4779,10 @@ function isCanonicalEmailVerificationUrl(url = '') {
 }
 
 function isStep3RecoveredAuthPageReady(pageState = {}) {
+  if (pageState?.hasFatalError || pageState?.hasAuthOperationTimedOut || pageState?.isReachable === false) {
+    return false;
+  }
+
   if (pageState?.hasReadyVerificationPage || pageState?.hasReadyProfilePage) {
     return true;
   }
@@ -4633,7 +4795,10 @@ function isStep3RecoveredAuthPageReady(pageState = {}) {
     return true;
   }
 
-  return isCanonicalEmailVerificationUrl(pageState?.url) || isCanonicalAboutYouUrl(pageState?.url);
+  return Boolean(
+    (isCanonicalEmailVerificationUrl(pageState?.url) && pageState?.hasReadyVerificationPage)
+    || (isCanonicalAboutYouUrl(pageState?.url) && pageState?.hasReadyProfilePage)
+  );
 }
 
 async function waitForStep3CompletionSignalOrRecoveredAuthState() {
@@ -4757,13 +4922,19 @@ async function ensureMailTabReady(mail, options = {}) {
   const alive = await isTabAlive(mail.source);
   const navigateIfUrlDiff = Boolean(options.navigateIfUrlDiff);
   if (alive) {
+    const tabId = await getTabId(mail.source);
+    const currentTab = tabId ? await chrome.tabs.get(tabId).catch(() => null) : null;
+    if (mail.source === 'tmailor-mail' && isBrowserErrorPageTab(currentTab)) {
+      await addLog(`TMailor: Mailbox tab is stuck on a browser error page. Reopening the TMailor home page before continuing...`, 'warn');
+      await reviveMailTab(mail);
+      return;
+    }
     if (mail.navigateOnReuse || navigateIfUrlDiff) {
       await reuseOrCreateTab(mail.source, mail.url, {
         inject: mail.inject,
         injectSource: mail.injectSource,
       });
     } else {
-      const tabId = await getTabId(mail.source);
       await chrome.tabs.update(tabId, { active: true });
     }
     return;
@@ -5806,7 +5977,7 @@ async function executeVerificationMailStep(step, state, options) {
     });
   }
 
-  const rejectedCodes = new Set();
+  const rejectedCodes = new Set(getRejectedVerificationCodesForStep(step, state));
   let currentFilterAfterTimestamp = filterAfterTimestamp;
   const maxInboxChecks = 4;
   let resendTriggered = false;
@@ -5873,11 +6044,15 @@ async function executeVerificationMailStep(step, state, options) {
 
     if (submitResult?.retryInbox) {
       rejectedCodes.add(result.code);
+      await rememberRejectedVerificationCode(step, result.code);
       continue;
     }
 
     if (step === 4) {
+      await clearRejectedVerificationCodes(step);
       await setState({ lastSignupVerificationCode: result.code });
+    } else if (step >= 7) {
+      await clearRejectedVerificationCodes(step);
     }
 
     if (submitResult?.accepted) {

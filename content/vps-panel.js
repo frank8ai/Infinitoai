@@ -81,6 +81,98 @@ async function handleAction(type, payload) {
   }
 }
 
+function isVpsLoginPage(url = location.href) {
+  return /\/management\.html#\/login/i.test(String(url || ''));
+}
+
+function hasVpsManagementKeyPrompt(text = (document.querySelector('body')?.textContent || '')) {
+  return /enter the management key|management key|管理密钥|管理 key/i.test(String(text || ''));
+}
+
+function findVpsManagementKeyInput() {
+  const directMatch = document.querySelector('#_r_1_')
+    || document.querySelector('input[placeholder="Enter the management key"]')
+    || document.querySelector('input[placeholder*="management key"]')
+    || document.querySelector('input.input[type="password"]')
+    || document.querySelector('input[type="password"]');
+
+  return directMatch || null;
+}
+
+function findVpsLoginButton() {
+  const directMatch = document.querySelector('button[type="submit"]')
+    || document.querySelector('input[type="submit"]')
+    || document.querySelector('button.btn.btn-primary.btn-full')
+    || document.querySelector('button.btn.btn-primary')
+    || document.querySelector('button.btn');
+
+  if (directMatch) {
+    return directMatch;
+  }
+
+  const candidates = typeof document.querySelectorAll === 'function'
+    ? Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"]'))
+    : [];
+
+  return candidates.find((node) => {
+    const text = String(node?.innerText || node?.textContent || node?.value || '').replace(/\s+/g, ' ').trim();
+    return /login|登录/i.test(text);
+  }) || null;
+}
+
+async function ensureVpsPanelAuthenticated(logStep = 1) {
+  const state = await chrome.runtime.sendMessage({ type: 'GET_RUNTIME_STATE' }).catch(() => null);
+  const bodyText = (document.querySelector('body')?.textContent || '').trim();
+  const managementKeyInput = findVpsManagementKeyInput();
+  const onLoginPage = isVpsLoginPage(location.href) || Boolean(managementKeyInput) || hasVpsManagementKeyPrompt(bodyText);
+
+  if (!onLoginPage) {
+    return state;
+  }
+
+  const cpaPassword = String(state?.vpsCpaPassword || '').trim();
+  if (!cpaPassword) {
+    throw new Error('VPS panel redirected to the management login page, but CPA password is empty. Fill the CPA password in Side Panel and retry.');
+  }
+
+  const stepLabel = `Step ${logStep}`;
+  const stepLabelZh = `第 ${logStep} 步`;
+  const passwordInput = managementKeyInput
+    || await waitForElement('#_r_1_', 5000).catch(() => waitForElement('input[placeholder*="management key"]', 5000).catch(() => null));
+
+  if (!passwordInput) {
+    throw new Error('VPS panel is on the management login page, but the management key input could not be found. URL: ' + location.href);
+  }
+
+  await humanPause(350, 900);
+  fillInput(passwordInput, cpaPassword);
+  log(`${stepLabelZh}：检测到 VPS 管理登录页，已填入 CPA password。`);
+
+  const loginButton = findVpsLoginButton()
+    || await waitForElementByText('button, [role="button"], input[type="submit"], input[type="button"]', /login|登录/i, 4000).catch(() => null);
+
+  if (loginButton) {
+    await humanPause(300, 850);
+    simulateClick(loginButton);
+    log(`${stepLabel}: Submitted VPS management login form.`);
+  } else {
+    passwordInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    passwordInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+    log(`${stepLabel}: Submitted VPS management login form with Enter.`);
+  }
+
+  await sleep(1200);
+
+  const targetUrl = String(state?.vpsUrl || '').trim();
+  if (targetUrl && isVpsLoginPage(location.href)) {
+    log(`${stepLabelZh}：登录后仍停在 VPS 登录页，主动跳回配置的 OAuth 页面。`, 'warn');
+    location.href = targetUrl;
+    await sleep(1200);
+  }
+
+  return state;
+}
+
 // ============================================================
 // Step 1: Get OAuth Link
 // ============================================================
@@ -94,10 +186,13 @@ async function fetchOAuthUrlFromPanel(options = {}) {
   let loginBtn = null;
 
   for (let attempt = 1; attempt <= maxCardLoadAttempts; attempt++) {
+    const state = await ensureVpsPanelAuthenticated(logStep);
     const bodyText = (document.querySelector('body')?.textContent || '').trim();
     if (/502\s+bad\s+gateway/i.test(bodyText)) {
-      const state = await chrome.runtime.sendMessage({ type: 'GET_RUNTIME_STATE' }).catch(() => null);
-      const fallbackUrl = String(state?.vpsUrl || '').trim();
+      const runtimeState = state?.vpsUrl
+        ? state
+        : await chrome.runtime.sendMessage({ type: 'GET_RUNTIME_STATE' }).catch(() => null);
+      const fallbackUrl = String(runtimeState?.vpsUrl || '').trim();
       if (fallbackUrl && fallbackUrl !== location.href) {
         log(`${stepLabelZh}：VPS 返回 502，改为重新打开已配置的 OAuth 页面，而不是刷新错误页。`, 'warn');
         location.href = fallbackUrl;

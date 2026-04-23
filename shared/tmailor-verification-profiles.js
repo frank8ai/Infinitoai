@@ -38,11 +38,11 @@
   const TMAILOR_VERIFICATION_PROFILES = {
     4: {
       senderFilters: ['openai', 'noreply', 'verify', 'auth', 'duckduckgo', 'forward'],
-      subjectFilters: ['verify', 'verification', 'code', '验证', 'confirm'],
+      subjectFilters: ['verify', 'verification', 'code', '验证', 'confirm', '認証', '確認', 'コード'],
     },
     7: {
       senderFilters: ['openai', 'noreply', 'verify', 'auth', 'chatgpt', 'duckduckgo', 'forward'],
-      subjectFilters: ['verify', 'verification', 'code', '验证', 'confirm', 'login'],
+      subjectFilters: ['verify', 'verification', 'code', '验证', 'confirm', 'login', '認証', '確認', 'コード', 'ログイン'],
     },
   };
 
@@ -65,9 +65,21 @@
     };
   }
 
-  function buildManualTmailorCodeFetchConfig({ currentStep = 0, targetEmail = '', signupCode = '' } = {}) {
+  function normalizeRejectedCodes(codes = []) {
+    const result = [];
+    for (const code of codes || []) {
+      const normalized = String(code || '').trim();
+      if (/^\d{6}$/.test(normalized) && !result.includes(normalized)) {
+        result.push(normalized);
+      }
+    }
+    return result;
+  }
+
+  function buildManualTmailorCodeFetchConfig({ currentStep = 0, targetEmail = '', signupCode = '', rejectedCodes = [] } = {}) {
     const step = inferTmailorManualFetchStep(currentStep);
     const profile = getTmailorVerificationProfile(step);
+    const normalizedRejectedCodes = normalizeRejectedCodes(rejectedCodes);
     return {
       step,
       ...profile,
@@ -76,9 +88,9 @@
       excludeCodes: step === 7
         ? mergeLoginVerificationCodeExclusions({
           signupCode,
-          rejectedCodes: [],
+          rejectedCodes: normalizedRejectedCodes,
         })
-        : [],
+        : normalizedRejectedCodes,
       maxAttempts: 6,
       intervalMs: 2500,
     };

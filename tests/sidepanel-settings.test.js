@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   buildTopSettingPayload,
+  DEFAULT_ACCOUNT_SUCCESS_ONLY,
   DEFAULT_AUTO_RUN_COUNT,
   DEFAULT_AUTO_RUN_INFINITE,
   DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
@@ -12,8 +13,13 @@ const {
   DEFAULT_CLOUDMAIL_DOMAINS,
   DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN,
   DEFAULT_CLOUDMAIL_SUBDOMAIN,
+  DEFAULT_CODEX2API_ACCOUNT_NAME,
+  DEFAULT_CODEX2API_ADMIN_KEY,
+  DEFAULT_CODEX2API_BASE_URL,
+  DEFAULT_CODEX2API_PROXY_URL,
   DEFAULT_EMAIL_SOURCE,
   DEFAULT_FINGERPRINT_PROVIDER,
+  DEFAULT_OAUTH_BACKEND,
   DEFAULT_ROXY_API_BASE_URL,
   DEFAULT_SIGNUP_ENTRY,
   getAutoContinueHint,
@@ -53,7 +59,7 @@ test('sanitizeInfiniteAutoRun coerces values to booleans', () => {
   assert.equal(sanitizeInfiniteAutoRun(undefined), false);
 });
 
-test('sanitizeEmailSource falls back to tmailor for unsupported values', () => {
+test('sanitizeEmailSource falls back to the configured default for unsupported values', () => {
   assert.equal(sanitizeEmailSource('duck'), 'duck');
   assert.equal(sanitizeEmailSource('33mail'), '33mail');
   assert.equal(sanitizeEmailSource('tmailor'), 'tmailor');
@@ -82,6 +88,7 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
   assert.deepEqual(
     normalizePersistentSettings({
       vpsUrl: 'http://127.0.0.1:3000',
+      vpsCpaPassword: 'secret-key',
       signupEntry: 'chatgpt',
       browserBackend: 'fingerprint',
       fingerprintProvider: 'roxy',
@@ -110,10 +117,12 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
       autoRunCount: '8',
       autoRunInfinite: 'true',
       autoRotateMailProvider: 'true',
+      accountSuccessOnly: false,
       customPassword: 'should-not-be-here',
     }),
     {
       vpsUrl: 'http://127.0.0.1:3000',
+      vpsCpaPassword: 'secret-key',
       signupEntry: 'chatgpt',
       browserBackend: 'fingerprint',
       fingerprintProvider: 'roxy',
@@ -143,6 +152,7 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
       autoRunCount: 8,
       autoRunInfinite: true,
       autoRotateMailProvider: true,
+      accountSuccessOnly: false,
     }
   );
 
@@ -150,6 +160,7 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
     normalizePersistentSettings({}),
     {
       vpsUrl: '',
+      vpsCpaPassword: '',
       signupEntry: DEFAULT_SIGNUP_ENTRY,
       browserBackend: DEFAULT_BROWSER_BACKEND,
       fingerprintProvider: DEFAULT_FINGERPRINT_PROVIDER,
@@ -171,14 +182,15 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
       cloudMailDomains: DEFAULT_CLOUDMAIL_DOMAINS,
       cloudMailSubdomain: DEFAULT_CLOUDMAIL_SUBDOMAIN,
       cloudMailEnableRandomSubdomain: DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN,
-      oauthBackend: 'vps',
-      codex2ApiBaseUrl: '',
-      codex2ApiAdminKey: '',
-      codex2ApiProxyUrl: '',
-      codex2ApiAccountName: '',
+      oauthBackend: DEFAULT_OAUTH_BACKEND,
+      codex2ApiBaseUrl: DEFAULT_CODEX2API_BASE_URL,
+      codex2ApiAdminKey: DEFAULT_CODEX2API_ADMIN_KEY,
+      codex2ApiProxyUrl: DEFAULT_CODEX2API_PROXY_URL,
+      codex2ApiAccountName: DEFAULT_CODEX2API_ACCOUNT_NAME,
       autoRunCount: DEFAULT_AUTO_RUN_COUNT,
       autoRunInfinite: DEFAULT_AUTO_RUN_INFINITE,
       autoRotateMailProvider: DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
+      accountSuccessOnly: DEFAULT_ACCOUNT_SUCCESS_ONLY,
     }
   );
 
@@ -186,6 +198,7 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
     PERSISTED_TOP_SETTING_KEYS,
     [
       'vpsUrl',
+      'vpsCpaPassword',
       'signupEntry',
       'browserBackend',
       'fingerprintProvider',
@@ -211,6 +224,7 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
       'autoRunCount',
       'autoRunInfinite',
       'autoRotateMailProvider',
+      'accountSuccessOnly',
     ]
   );
 });
@@ -219,6 +233,7 @@ test('buildTopSettingPayload keeps the current email source and related settings
   assert.deepEqual(
     buildTopSettingPayload({
       vpsUrl: ' https://panel.example.com ',
+      vpsCpaPassword: ' secret-key ',
       signupEntry: 'chatgpt',
       browserBackend: 'fingerprint',
       fingerprintProvider: 'roxy',
@@ -247,9 +262,11 @@ test('buildTopSettingPayload keeps the current email source and related settings
       autoRunCount: '6',
       autoRunInfinite: 'true',
       autoRotateMailProvider: 'false',
+      accountSuccessOnly: false,
     }),
     {
       vpsUrl: 'https://panel.example.com',
+      vpsCpaPassword: 'secret-key',
       signupEntry: 'chatgpt',
       browserBackend: 'fingerprint',
       fingerprintProvider: 'roxy',
@@ -279,6 +296,7 @@ test('buildTopSettingPayload keeps the current email source and related settings
       autoRunCount: 6,
       autoRunInfinite: true,
       autoRotateMailProvider: false,
+      accountSuccessOnly: false,
     }
   );
 });
@@ -326,42 +344,6 @@ test('TempMail defaults point at the coffeejadore worker mailbox', () => {
   assert.equal(DEFAULT_CLOUDMAIL_BASE_URL, 'https://temp-email-api.bitpowerhub.com');
   assert.equal(DEFAULT_CLOUDMAIL_DOMAINS, EXPECTED_TEMPMAIL_LOCKED_SUBDOMAINS);
   assert.equal(DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN, false);
-
-  assert.deepEqual(
-    normalizePersistentSettings({}),
-    {
-      vpsUrl: '',
-      signupEntry: DEFAULT_SIGNUP_ENTRY,
-      browserBackend: DEFAULT_BROWSER_BACKEND,
-      fingerprintProvider: DEFAULT_FINGERPRINT_PROVIDER,
-      roxyApiBaseUrl: DEFAULT_ROXY_API_BASE_URL,
-      roxyApiToken: '',
-      roxyWorkspaceId: '',
-      mailProvider: '163',
-      emailSource: DEFAULT_EMAIL_SOURCE,
-      mailDomainSettings: {
-        '163': { emailDomain: '' },
-        qq: { emailDomain: '' },
-        inbucket: { emailDomain: '' },
-      },
-      inbucketHost: '',
-      inbucketMailbox: '',
-      cloudMailBaseUrl: DEFAULT_CLOUDMAIL_BASE_URL,
-      cloudMailAdminEmail: 'm1n1ewx@coffeejadore.com',
-      cloudMailAdminPassword: DEFAULT_CLOUDMAIL_ADMIN_PASSWORD,
-      cloudMailDomains: DEFAULT_CLOUDMAIL_DOMAINS,
-      cloudMailSubdomain: DEFAULT_CLOUDMAIL_SUBDOMAIN,
-      cloudMailEnableRandomSubdomain: false,
-      oauthBackend: 'vps',
-      codex2ApiBaseUrl: '',
-      codex2ApiAdminKey: '',
-      codex2ApiProxyUrl: '',
-      codex2ApiAccountName: '',
-      autoRunCount: DEFAULT_AUTO_RUN_COUNT,
-      autoRunInfinite: DEFAULT_AUTO_RUN_INFINITE,
-      autoRotateMailProvider: DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
-    }
-  );
 });
 
 test('sidepanel settings no longer expose VPS validation helpers', () => {

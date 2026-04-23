@@ -12,6 +12,9 @@ const getStepMailMatchProfile = MailMatching?.getStepMailMatchProfile || functio
 const isExpectedVerificationMailDetail = MailMatching?.isExpectedVerificationMailDetail || function() {
   return true;
 };
+const getVerificationMailIntent = MailMatching?.getVerificationMailIntent || function() {
+  return 'unknown';
+};
 const hasSignupVerificationMailDetail = MailMatching?.hasSignupVerificationMailDetail || function() {
   return false;
 };
@@ -23,6 +26,12 @@ const matchesSubjectPatterns = MailMatching?.matchesSubjectPatterns || function(
 };
 const normalizeText = MailMatching?.normalizeText || function(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
+};
+const findLatestMatchingItem = LatestMail?.findLatestMatchingItem || function(items, predicate) {
+  for (const item of items || []) {
+    if (predicate(item)) return item;
+  }
+  return null;
 };
 const { isMailFresh, parseMailTimestampCandidates } = MailFreshness;
 const EMAIL_REGEX = /\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i;
@@ -909,6 +918,25 @@ function buildRejectedVerificationDetailCacheKey(step, payload = {}) {
   return `${numericStep}:${targetEmail}`;
 }
 
+function expandRejectedVerificationMailIds(mailId = '') {
+  const normalizedMailId = String(mailId || '').trim();
+  if (!normalizedMailId) {
+    return [];
+  }
+
+  const mailIds = new Set([normalizedMailId]);
+  const emailIdMatch = normalizedMailId.match(/[?&]emailid=([^&#]+)/i);
+  if (emailIdMatch?.[1]) {
+    try {
+      mailIds.add(decodeURIComponent(emailIdMatch[1]));
+    } catch {
+      mailIds.add(emailIdMatch[1]);
+    }
+  }
+
+  return Array.from(mailIds);
+}
+
 function getRememberedRejectedVerificationDetails(step, payload = {}) {
   const numericStep = Number.parseInt(String(step ?? 0), 10) || 0;
   if (numericStep !== 7) {
@@ -943,7 +971,10 @@ function rememberRejectedVerificationDetail(step, payload = {}, detail = {}) {
     currentEntry.codes = Array.from(new Set([...(currentEntry.codes || []), code]));
   }
   if (mailId) {
-    currentEntry.mailIds = Array.from(new Set([...(currentEntry.mailIds || []), mailId]));
+    currentEntry.mailIds = Array.from(new Set([
+      ...(currentEntry.mailIds || []),
+      ...expandRejectedVerificationMailIds(mailId),
+    ]));
   }
   currentEntry.updatedAt = Date.now();
   cache[key] = currentEntry;
@@ -2031,6 +2062,9 @@ function extractVerificationCode(text) {
   const matchCn = text.match(/(?:代码为|验证码[^0-9]*?)[\s：:]*(\d{6})/);
   if (matchCn) return matchCn[1];
 
+  const matchJa = text.match(/(?:(?:認証|確認)?コード)\s*(?:は|[:：])?\s*(\d{6})/i);
+  if (matchJa) return matchJa[1];
+
   const matchEn = text.match(/code[:\s]+is[:\s]+(\d{6})|code[:\s]+(\d{6})/i);
   if (matchEn) return matchEn[1] || matchEn[2];
 
@@ -2269,16 +2303,35 @@ function findCodeInPageText() {
     'h1',
     '#bodyCell',
     'table.main',
+    'table.main p',
     'td#bodyCell p',
     'td#bodyCell',
+    '#bodyCell > table.main > tbody > tr td > p',
   ];
 
   for (const selector of detailSelectors) {
-    const element = document.querySelector(selector);
-    const code = extractVerificationCode(element?.textContent || '');
-    if (code) {
-      return code;
+    const elements = Array.from(document.querySelectorAll(selector));
+    if (elements.length === 0) {
+      const singleElement = document.querySelector(selector);
+      if (singleElement) {
+        elements.push(singleElement);
+      }
     }
+    for (const element of elements) {
+      const code = extractVerificationCode(element?.textContent || '');
+      if (code) {
+        return code;
+      }
+    }
+  }
+
+  for (const frame of document.querySelectorAll('iframe, frame')) {
+    try {
+      const code = extractVerificationCode(frame?.contentDocument?.body?.innerText || '');
+      if (code) {
+        return code;
+      }
+    } catch {}
   }
 
   return extractVerificationCode(document.body?.innerText || '');
@@ -2288,25 +2341,137 @@ function getCurrentDetailPageText() {
   const detailSelectors = [
     'h1',
     '#bodyCell',
+    'table.main',
     'td#bodyCell p',
     'td#bodyCell',
     'table.main h1',
     'table.main p',
     'table.main td',
+    '#bodyCell > table.main > tbody > tr td > p',
   ];
   const chunks = [];
   const seen = new Set();
 
   for (const selector of detailSelectors) {
-    const element = document.querySelector(selector);
-    const text = normalizeText(element?.textContent || '');
-    if (text && !seen.has(text)) {
-      seen.add(text);
-      chunks.push(text);
+    const elements = Array.from(document.querySelectorAll(selector));
+    if (elements.length === 0) {
+      const singleElement = document.querySelector(selector);
+      if (singleElement) {
+        elements.push(singleElement);
+      }
+    }
+    for (const element of elements) {
+      const text = normalizeText(element?.textContent || '');
+      if (text && !seen.has(text)) {
+        seen.add(text);
+        chunks.push(text);
+      }
+    }
+  }
+
+  if (chunks.length === 0) {
+    const bodyText = normalizeText(document.body?.innerText || '');
+    if (bodyText) {
+      chunks.push(bodyText);
     }
   }
 
   return normalizeText(chunks.join(' '));
+}
+
+function collectDetailTextSources() {
+  const sources = [];
+  const readNodeText = (node) => {
+    if (!node) {
+      return '';
+    }
+    return node.innerText || node.textContent || '';
+  };
+  const push = (label, text) => {
+    const normalized = normalizeText(text);
+    if (!normalized) {
+      return;
+    }
+    sources.push({ label, text: normalized });
+  };
+
+  push('main-body', readNodeText(document.body));
+  push('#bodyCell', readNodeText(document.querySelector('#bodyCell')));
+  push('table.main', readNodeText(document.querySelector('table.main')));
+  push('h1', readNodeText(document.querySelector('h1')));
+
+  let iframeIndex = 0;
+  for (const frame of document.querySelectorAll('iframe, frame')) {
+    try {
+      push(`iframe-${iframeIndex}`, readNodeText(frame?.contentDocument?.body));
+    } catch {}
+    iframeIndex += 1;
+  }
+
+  return sources;
+}
+
+function scoreDetailTextSource(source, step, expectedCode = '') {
+  const text = normalizeText(source?.text || '');
+  if (!text) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const code = extractVerificationCode(text);
+  const intent = getVerificationMailIntent(text);
+  const label = String(source?.label || '');
+  const isIframe = /^iframe-/i.test(label);
+  let score = Math.min(text.length, 240) / 10;
+
+  if (expectedCode) {
+    if (code === expectedCode) {
+      score += 240;
+    } else if (code) {
+      score -= 240;
+    }
+  } else if (code) {
+    score += 140;
+  }
+
+  if (step >= 7) {
+    if (intent === 'login' || intent === 'mixed') score += 180;
+    if (intent === 'signup') score += 90;
+    if (label === 'main-body') score += 40;
+    if (label === '#bodyCell' || label === 'table.main') score += 20;
+    if (label === 'h1') score -= 20;
+    if (isIframe) score -= 25;
+  } else {
+    if (intent === 'signup' || intent === 'mixed') score += 160;
+    if (intent === 'login') score += 80;
+    if (isIframe) score += 80;
+    if (label === '#bodyCell' || label === 'table.main') score += 20;
+    if (label === 'main-body') score -= 40;
+    if (label === 'h1') score -= 20;
+  }
+
+  return score;
+}
+
+function selectBestDetailTextSource(step, expectedCode = '') {
+  const candidates = collectDetailTextSources();
+  let best = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const candidate of candidates) {
+    const score = scoreDetailTextSource(candidate, step, expectedCode);
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+
+  return best;
+}
+
+function getCurrentDetailDiagnosticSnippet(step = 0, code = '', maxLength = 180) {
+  const preferred = selectBestDetailTextSource(step, code);
+  const text = normalizeText(preferred?.text || getCurrentDetailPageText() || document.body?.innerText || '');
+  return text.slice(0, maxLength);
 }
 
 function shouldReturnToInboxAfterDetailRead(step) {
@@ -2317,34 +2482,87 @@ function shouldInspectDetailBeforeAcceptingCode(step) {
   return Number.parseInt(String(step ?? 0), 10) === 7;
 }
 
+function getLatestMailFallbackRejectionReason(step, detailText) {
+  const numericStep = Number.parseInt(String(step ?? 0), 10) || 0;
+  const intent = getVerificationMailIntent(detailText);
+  if (numericStep === 4 && intent === 'login') {
+    return 'login_intent';
+  }
+  if (numericStep === 7 && intent === 'signup') {
+    return 'signup_intent';
+  }
+  return '';
+}
+
 function buildStep7DetailDecisionLog(detail = {}, step = 0) {
   const detailText = normalizeText(detail?.detailText || '');
   const snippet = detailText.slice(0, 220);
   const sanitizedSnippet = snippet.replace(/"/g, '\\"');
-  const signupIntent = hasSignupVerificationMailDetail(step, detailText) ? 'yes' : 'no';
-  const loginIntent = hasLoginVerificationMailDetail(step, detailText) ? 'yes' : 'no';
+  const detailIntent = getVerificationMailIntent(detailText);
+  const signupIntent = detailIntent === 'signup' || detailIntent === 'mixed' ? 'yes' : 'no';
+  const loginIntent = detailIntent === 'login' || detailIntent === 'mixed' ? 'yes' : 'no';
   const reason = String(detail?.rejectedReason || 'accepted').trim() || 'accepted';
   const code = String(detail?.code || '').trim() || 'none';
   const mailId = String(detail?.mailId || '').trim() || 'none';
   return `reason=${reason}; code=${code}; signupIntent=${signupIntent}; loginIntent=${loginIntent}; mailId=${mailId}; snippet="${sanitizedSnippet}"`;
 }
 
-async function waitForStep7DetailTextToSettle(timeoutMs = 1800, intervalMs = 250) {
-  let latestDetailText = normalizeText(getCurrentDetailPageText());
-  if (hasLoginVerificationMailDetail(7, latestDetailText)) {
+function isSparseDetailText(step, detailText, code = '') {
+  const normalized = normalizeText(detailText);
+  if (!normalized) {
+    return true;
+  }
+
+  const normalizedCode = String(code || '').trim();
+  const textWithoutCode = normalizeText(
+    normalizedCode ? normalized.replace(normalizedCode, ' ') : normalized
+  );
+  if (!textWithoutCode) {
+    return true;
+  }
+
+  const subjectProfile = getStepMailMatchProfile(step);
+  const genericTitleOnly = matchesSubjectPatterns(textWithoutCode, subjectProfile)
+    && !hasLoginVerificationMailDetail(step, textWithoutCode)
+    && !hasSignupVerificationMailDetail(step, textWithoutCode);
+
+  return genericTitleOnly;
+}
+
+async function waitForDetailTextToSettleAfterCode(step, code = '', timeoutMs = 1800, intervalMs = 250) {
+  let latestDetailText = normalizeText(selectBestDetailTextSource(step, code)?.text || getCurrentDetailPageText());
+  let previousDetailText = latestDetailText;
+  let stableCount = latestDetailText && !isSparseDetailText(step, latestDetailText, code) ? 1 : 0;
+
+  if (hasLoginVerificationMailDetail(step, latestDetailText) && !isSparseDetailText(step, latestDetailText, code)) {
     return latestDetailText;
   }
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
-    await sleepWithMailboxPatrol(intervalMs, { reason: 'waiting for the step 7 mail detail text to settle' });
-    const nextDetailText = normalizeText(getCurrentDetailPageText());
+    if (stableCount >= 2) {
+      return latestDetailText;
+    }
+
+    await sleepWithMailboxPatrol(intervalMs, { reason: 'waiting for the mail detail text to settle' });
+    const nextDetailText = normalizeText(selectBestDetailTextSource(step, code)?.text || getCurrentDetailPageText());
     if (nextDetailText) {
       latestDetailText = nextDetailText;
     }
-    if (hasLoginVerificationMailDetail(7, nextDetailText)) {
+    if (hasLoginVerificationMailDetail(step, nextDetailText) && !isSparseDetailText(step, nextDetailText, code)) {
       return nextDetailText;
     }
+
+    if (
+      nextDetailText
+      && nextDetailText === previousDetailText
+      && !isSparseDetailText(step, nextDetailText, code)
+    ) {
+      stableCount += 1;
+    } else {
+      stableCount = nextDetailText && !isSparseDetailText(step, nextDetailText, code) ? 1 : 0;
+    }
+    previousDetailText = nextDetailText;
   }
 
   return latestDetailText;
@@ -2383,7 +2601,11 @@ async function readCodeFromVisibleDetailPage(step, payload = {}, options = {}) {
     return null;
   }
 
-  const code = findCodeInPageText();
+  let preferredSource = selectBestDetailTextSource(step);
+  let code = extractVerificationCode(preferredSource?.text || '') || findCodeInPageText();
+  if (!code && options.requireDetailUrl && /emailid=/i.test(location.href)) {
+    code = await waitForCodeInPage(3500, 250);
+  }
   if (!code) {
     return null;
   }
@@ -2393,9 +2615,12 @@ async function readCodeFromVisibleDetailPage(step, payload = {}, options = {}) {
     subjectFilters = [],
     targetEmail = '',
   } = payload;
-  let detailText = getCurrentDetailPageText();
-  if (shouldInspectDetailBeforeAcceptingCode(step)) {
-    detailText = await waitForStep7DetailTextToSettle();
+  const allowLatestMailFallback = options.allowLatestMailFallback === true;
+  let detailText = normalizeText(selectBestDetailTextSource(step, code)?.text || getCurrentDetailPageText());
+  if (options.requireDetailUrl && /emailid=/i.test(location.href)) {
+    detailText = await waitForDetailTextToSettleAfterCode(step, code, 2500, 250);
+  } else if (shouldInspectDetailBeforeAcceptingCode(step)) {
+    detailText = await waitForDetailTextToSettleAfterCode(step, code, 1800, 250);
   }
   const detailLower = detailText.toLowerCase();
   const subjectProfile = getStepMailMatchProfile(step);
@@ -2405,9 +2630,22 @@ async function readCodeFromVisibleDetailPage(step, payload = {}, options = {}) {
   const targetMatch = targetLocal && detailLower.includes(targetLocal);
   const stepSpecificSubjectMatch = matchesSubjectPatterns(detailText, subjectProfile);
   const explicitLoginIntent = hasLoginVerificationMailDetail(step, detailText);
+  const latestMailFallbackRejectionReason = allowLatestMailFallback
+    ? getLatestMailFallbackRejectionReason(step, detailText)
+    : '';
 
-  if (!(stepSpecificSubjectMatch || (!subjectProfile && (senderMatch || subjectMatch || targetMatch)))) {
+  if (!allowLatestMailFallback && !(stepSpecificSubjectMatch || senderMatch || subjectMatch || targetMatch)) {
     return null;
+  }
+
+  if (latestMailFallbackRejectionReason) {
+    return {
+      code,
+      detailText,
+      rejectedReason: latestMailFallbackRejectionReason,
+      emailTimestamp: 0,
+      mailId: location.href,
+    };
   }
 
   if (explicitLoginIntent) {
@@ -2455,9 +2693,9 @@ async function waitForCodeInPage(timeoutMs = 4000, intervalMs = 250) {
   return null;
 }
 
-async function readCodeFromMailRow(row, step = 0, payload = {}) {
+async function readCodeFromMailRow(row, step = 0, payload = {}, options = {}) {
   let code = extractVerificationCode(row?.combinedText || '');
-  if (code && !shouldInspectDetailBeforeAcceptingCode(step)) {
+  if (code && !shouldInspectDetailBeforeAcceptingCode(step) && !options.forceOpenDetail) {
     return code;
   }
 
@@ -2466,10 +2704,16 @@ async function readCodeFromMailRow(row, step = 0, payload = {}) {
   await settleMailDetailInterruptions();
   code = await waitForCodeInPage(8000, 250);
   if (code) {
-    const detailResult = await readCodeFromVisibleDetailPage(step, payload, { requireDetailUrl: false });
-    if (detailResult?.rejectedReason === 'signup_intent') {
+    const detailResult = await readCodeFromVisibleDetailPage(step, payload, {
+      allowLatestMailFallback: options.allowLatestMailFallback,
+      requireDetailUrl: false,
+    });
+    if (detailResult?.rejectedReason === 'signup_intent' || detailResult?.rejectedReason === 'login_intent') {
       rememberRejectedVerificationDetail(step, payload, detailResult);
-      log(`Step ${step}: TMailor detail mail looked like a signup verification email. Returning to inbox and fetching another mail.`, 'info');
+      const rejectionMessage = detailResult.rejectedReason === 'login_intent'
+        ? 'TMailor detail mail looked like a login verification email. Returning to inbox and fetching another mail.'
+        : 'TMailor detail mail looked like a signup verification email. Returning to inbox and fetching another mail.';
+      log(`Step ${step}: ${rejectionMessage}`, 'info');
       log(`Step ${step}: TMailor detail rejection details: ${buildStep7DetailDecisionLog(detailResult, step)}`, 'info');
       await returnToInboxFromDetailPage(payload, 'returning to the inbox view after rejecting a signup-style mail detail');
       return null;
@@ -2477,7 +2721,7 @@ async function readCodeFromMailRow(row, step = 0, payload = {}) {
     if (detailResult?.code) {
       return detailResult.code;
     }
-    return shouldInspectDetailBeforeAcceptingCode(step) ? null : code;
+    return shouldInspectDetailBeforeAcceptingCode(step) || options.forceOpenDetail ? null : code;
   }
 
   log('TMailor: Mail detail opened but the verification code did not become visible in time. Leaving the detail page untouched so the next mailbox command can recover safely.', 'info');
@@ -2512,7 +2756,8 @@ async function handlePollEmail(step, payload) {
   const now = Date.now();
   const existingRowIds = new Set(findMailRows().map((element, index) => buildRowId(element, index)));
   const targetLocal = String(targetEmail || '').split('@')[0].trim().toLowerCase();
-  const fallbackAfter = 4;
+  const latestMailFallbackThreshold = 3;
+  let consecutiveSubjectMissAttempts = 0;
   const syncRememberedRejectedDetails = () => {
     const latestRejectedDetails = getRememberedRejectedVerificationDetails(step, payload);
     for (const code of latestRejectedDetails.codes) {
@@ -2569,9 +2814,18 @@ async function handlePollEmail(step, payload) {
         ok: true,
         ...currentDetailResult,
       };
+    } else if (/emailid=/i.test(location.href)) {
+      const detailSnippet = getCurrentDetailDiagnosticSnippet(step);
+      log(
+        `Step ${step}: Current TMailor detail page did not expose a verification code after waiting briefly. Returning to inbox and retrying from the inbox list. detailSnippet="${detailSnippet || 'empty'}"; url=${location.href}`,
+        'info'
+      );
+      await returnToInboxFromDetailPage(
+        payload,
+        'returning to the inbox view after a reinjected detail page did not expose the verification code in time'
+      );
     }
 
-    const useFallback = attempt > fallbackAfter;
     const rows = findMailRows().map(parseMailRow);
     const candidateMatches = rows.filter((row) => {
       if (excludedMailIdSet.has(row.id)) {
@@ -2593,9 +2847,14 @@ async function handlePollEmail(step, payload) {
       }
 
       const looksNewEnough = !existingRowIds.has(row.id) || stepSpecificSubjectMatch || targetMatch;
-      const effectiveTimestamp = row.timestamp || (!useFallback && looksNewEnough ? Date.now() : 0);
+      const effectiveTimestamp = row.timestamp || (looksNewEnough ? Date.now() : 0);
       return isMailFresh(effectiveTimestamp, { now, filterAfterTimestamp });
     });
+    if (candidateMatches.length === 0) {
+      consecutiveSubjectMissAttempts += 1;
+    } else {
+      consecutiveSubjectMissAttempts = 0;
+    }
 
     for (const latestMatch of candidateMatches) {
       const code = await readCodeFromMailRow(latestMatch, step, payload);
@@ -2613,6 +2872,38 @@ async function handlePollEmail(step, payload) {
           emailTimestamp: latestMatch.timestamp || Date.now(),
           mailId: latestMatch.id,
         };
+      }
+    }
+
+    if (candidateMatches.length === 0 && consecutiveSubjectMissAttempts >= latestMailFallbackThreshold) {
+      const latestFallbackRow = findLatestMatchingItem(rows, (row) => {
+        if (excludedMailIdSet.has(row.id)) {
+          return false;
+        }
+        const previewCode = extractVerificationCode(row.combinedText || '');
+        if (previewCode && excludedCodeSet.has(previewCode)) {
+          return false;
+        }
+        return isMailFresh(row.timestamp, { now, filterAfterTimestamp });
+      });
+
+      if (latestFallbackRow) {
+        log(`Step ${step}: No subject-matched mail found after ${consecutiveSubjectMissAttempts} attempts. Opening the latest fresh mail detail as a fallback.`, 'info');
+        const fallbackCode = await readCodeFromMailRow(latestFallbackRow, step, payload, {
+          allowLatestMailFallback: true,
+          forceOpenDetail: true,
+        });
+        syncRememberedRejectedDetails();
+        if (fallbackCode && !excludedCodeSet.has(fallbackCode)) {
+          clearRememberedRejectedVerificationDetails(step, payload);
+          return {
+            ok: true,
+            code: fallbackCode,
+            emailTimestamp: latestFallbackRow.timestamp || Date.now(),
+            mailId: latestFallbackRow.id,
+          };
+        }
+        excludedMailIdSet.add(latestFallbackRow.id);
       }
     }
 

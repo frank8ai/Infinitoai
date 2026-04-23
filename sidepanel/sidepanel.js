@@ -42,6 +42,9 @@ const btnExportAccountsCsv = document.getElementById('btn-export-accounts-csv');
 const tbodyAccountRecords = document.getElementById('tbody-account-records');
 const inputVpsUrl = document.getElementById('input-vps-url');
 const btnToggleVpsUrl = document.getElementById('btn-toggle-vps-url');
+const rowVpsCpaPassword = document.getElementById('row-vps-cpa-password');
+const inputVpsCpaPassword = document.getElementById('input-vps-cpa-password');
+const btnToggleVpsCpaPassword = document.getElementById('btn-toggle-vps-cpa-password');
 const selectSignupEntry = document.getElementById('select-signup-entry');
 const selectBrowserBackend = document.getElementById('select-browser-backend');
 const rowFingerprintProvider = document.getElementById('row-fingerprint-provider');
@@ -170,7 +173,7 @@ let selectedLogRoundId = '';
 let followLatestLogRound = true;
 let lastTargetEmailAcquiredAtState = null;
 let accountRecordsState = [];
-let showSuccessOnlyAccountRecords = false;
+let showSuccessOnlyAccountRecords = true;
 let activePanelView = 'console';
 renderTmailorModeOptions();
 
@@ -485,6 +488,9 @@ async function restoreState() {
     if (state.vpsUrl) {
       inputVpsUrl.value = state.vpsUrl;
     }
+    if (state.vpsCpaPassword) {
+      inputVpsCpaPassword.value = state.vpsCpaPassword;
+    }
     if (selectSignupEntry) {
       selectSignupEntry.value = sanitizeSignupEntry(state.signupEntry);
     }
@@ -550,6 +556,10 @@ async function restoreState() {
     }
     inputRunCount.value = String(state.autoRunCount || DEFAULT_AUTO_RUN_COUNT);
     inputRunInfinite.checked = Boolean(state.autoRunInfinite);
+    showSuccessOnlyAccountRecords = state.accountSuccessOnly !== false;
+    if (inputAccountsSuccessOnly) {
+      inputAccountsSuccessOnly.checked = showSuccessOnlyAccountRecords;
+    }
 
     if (state.stepStatuses) {
       for (const [step, status] of Object.entries(state.stepStatuses)) {
@@ -779,6 +789,9 @@ function updateMailProviderUI() {
 function updateOAuthBackendUI() {
   const useCodex2Api = selectOauthBackend.value === 'codex2api';
   document.getElementById('row-vps').style.display = useCodex2Api ? 'none' : '';
+  if (rowVpsCpaPassword) {
+    rowVpsCpaPassword.style.display = useCodex2Api ? 'none' : '';
+  }
   rowCodex2ApiSettings.style.display = useCodex2Api ? '' : 'none';
 }
 
@@ -1106,6 +1119,13 @@ function renderVpsToggleButton() {
   btnToggleVpsUrl.setAttribute('aria-label', btnToggleVpsUrl.title);
 }
 
+function renderVpsCpaPasswordToggleButton() {
+  const hidden = inputVpsCpaPassword.type === 'password';
+  btnToggleVpsCpaPassword.innerHTML = hidden ? ACTION_ICONS.eye : ACTION_ICONS.eyeOff;
+  btnToggleVpsCpaPassword.title = hidden ? 'Show CPA password' : 'Hide CPA password';
+  btnToggleVpsCpaPassword.setAttribute('aria-label', btnToggleVpsCpaPassword.title);
+}
+
 function renderTmailorApiStatus() {
   if (!tmailorApiStatus) {
     return;
@@ -1197,6 +1217,7 @@ function renderStaticActionButtons() {
     btnCopyLogRound.innerHTML = ACTION_ICONS.copy;
   }
   renderTmailorApiCodeButton(false);
+  renderVpsCpaPasswordToggleButton();
 }
 
 function formatAutoRunWaitUntil(waitUntilTimestamp) {
@@ -1550,6 +1571,7 @@ async function pasteAndValidateTmailorEmail() {
 function syncPasswordToggleLabel() {
   renderPasswordToggleButton();
   renderVpsToggleButton();
+  renderVpsCpaPasswordToggleButton();
 }
 
 // ============================================================
@@ -1661,6 +1683,11 @@ btnToggleVpsUrl.addEventListener('click', () => {
   renderVpsToggleButton();
 });
 
+btnToggleVpsCpaPassword.addEventListener('click', () => {
+  inputVpsCpaPassword.type = inputVpsCpaPassword.type === 'password' ? 'text' : 'password';
+  renderVpsCpaPasswordToggleButton();
+});
+
 btnStop.addEventListener('click', async () => {
   btnStop.disabled = true;
   await chrome.runtime.sendMessage({ type: 'STOP_FLOW', source: 'sidepanel', payload: {} });
@@ -1749,6 +1776,7 @@ async function saveTopSetting(payload) {
 function collectTopSettingPayload(overrides = {}) {
   return buildTopSettingPayload({
     vpsUrl: inputVpsUrl.value,
+    vpsCpaPassword: inputVpsCpaPassword.value,
     signupEntry: selectSignupEntry ? selectSignupEntry.value : DEFAULT_SIGNUP_ENTRY,
     browserBackend: selectBrowserBackend ? selectBrowserBackend.value : DEFAULT_BROWSER_BACKEND,
     fingerprintProvider: selectFingerprintProvider ? selectFingerprintProvider.value : DEFAULT_FINGERPRINT_PROVIDER,
@@ -1774,6 +1802,7 @@ function collectTopSettingPayload(overrides = {}) {
     autoRunCount: inputRunCount.value,
     autoRunInfinite: inputRunInfinite.checked,
     autoRotateMailProvider: inputAutoRotateMailProvider.checked,
+    accountSuccessOnly: inputAccountsSuccessOnly ? inputAccountsSuccessOnly.checked : showSuccessOnlyAccountRecords,
     ...overrides,
   });
 }
@@ -1824,6 +1853,10 @@ inputEmail.addEventListener('change', async () => {
 inputVpsUrl.addEventListener('input', async () => {
   const vpsUrl = inputVpsUrl.value.trim();
   await saveTopSetting({ vpsUrl });
+});
+
+inputVpsCpaPassword.addEventListener('change', async () => {
+  await saveTopSetting({ vpsCpaPassword: inputVpsCpaPassword.value });
 });
 
 if (selectSignupEntry) {
@@ -2014,8 +2047,9 @@ btnViewAccounts.addEventListener('click', () => {
 });
 
 if (inputAccountsSuccessOnly) {
-  inputAccountsSuccessOnly.addEventListener('change', () => {
+  inputAccountsSuccessOnly.addEventListener('change', async () => {
     showSuccessOnlyAccountRecords = Boolean(inputAccountsSuccessOnly.checked);
+    await saveTopSetting({ accountSuccessOnly: showSuccessOnlyAccountRecords });
     renderAccountRecords(accountRecordsState);
   });
 }
@@ -2112,6 +2146,13 @@ chrome.runtime.onMessage.addListener((message) => {
       }
       if (message.payload.accountRecords !== undefined) {
         renderAccountRecords(message.payload.accountRecords);
+      }
+      if (message.payload.accountSuccessOnly !== undefined) {
+        showSuccessOnlyAccountRecords = message.payload.accountSuccessOnly !== false;
+        if (inputAccountsSuccessOnly) {
+          inputAccountsSuccessOnly.checked = showSuccessOnlyAccountRecords;
+        }
+        renderAccountRecords(accountRecordsState);
       }
       if (message.payload.lastTargetEmailAcquiredAt !== undefined) {
         updateTargetEmailTimerDisplay(message.payload.lastTargetEmailAcquiredAt);

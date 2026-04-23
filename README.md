@@ -4,6 +4,8 @@
 
 当前版本已经不再只是“点 9 个步骤”的早期脚本，而是演进成了一个带有多邮箱源、多收件通道、自动重试、失败统计、人工接管和域名策略的流程编排器。
 
+> *注：本项目自fork以来 100% 纯纯vibe，无任何人工介入（甩锅叠甲）*
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Logan66666/Infinitoai&type=Date)](https://star-history.com/#Logan66666/Infinitoai&Date)
@@ -93,10 +95,11 @@
 推荐第一次先这样跑：
 
 1. 在 `VPS` 中填好 OAuth 面板地址
-2. 选择 `Source`
-3. 如果 `Source = 33mail`，先配置对应组的 33mail 域名
-4. 如果 `Source = Duck`，再选择一个 `Mail` 通道用于收验证码
-5. 首次访问 VPS 面板时，如果浏览器弹出站点权限确认，允许当前 VPS 域名
+2. 如果你的面板会先跳到 `#/login`，把 `CPA Password` 一起填好
+3. 选择 `Source`
+4. 如果 `Source = 33mail`，先配置对应组的 33mail 域名
+5. 如果 `Source = Duck`，再选择一个 `Mail` 通道用于收验证码
+6. 首次访问 VPS 面板或 Codex2API 时，如果浏览器弹出站点权限确认，允许当前域名
 6. 先手动跑 Step 1 -> Step 4，确认邮箱和验证码链路没问题
 7. 再跑完整 1 -> 9，确认 OAuth 回调能回写
 8. 最后再开启 `Auto`
@@ -115,7 +118,7 @@ Step 1 和 Step 9 都依赖这个地址。
 
 ### `OAuth`
 
-默认使用 `VPS Panel`，也就是原来的页面自动化方式。
+默认使用 `Codex2API`。
 
 也可以切换为 `Codex2API`：
 
@@ -141,6 +144,18 @@ Step 1 和 Step 9 都依赖这个地址。
 TempMail 会在 Step 3 前自动创建邮箱；无论是扩展模式还是指纹浏览器模式，都会先把邮箱和密码准备好，再继续 Step 3，并在 Step 4 / Step 7 通过后台 API 查验证码。
 TempMail admin 密码只保存在可信配置里，不会发给内容脚本，也不会出现在普通日志或状态广播中。
 如果你要跑 Worker 随机子域，不要手工把随机前缀直接写进 `Domains`；应当填写基础域名，再开启 `Random subdomain`。
+
+### `CPA Password`
+
+当 VPS 面板有时会先跳到：
+
+```txt
+https://<your-panel>/management.html#/login
+```
+
+扩展会先在登录页寻找 `Enter the management key` 输入框，自动填入这里保存的 `CPA Password`，登录成功后再跳回配置的 OAuth 页面继续执行 Step 1 / Step 6 / Step 9。
+
+如果你的 VPS 面板不会出现这个登录页，这个输入框可以留空。
 
 ### `Mail`
 
@@ -319,6 +334,7 @@ https://<your-inbucket-host>/m/<mailbox>/
 ### Step 1: Get OAuth Link
 
 - 打开 VPS OAuth 面板
+- 如果先跳到 `#/login`，会先自动填写 `CPA Password`
 - 等待目标卡片出现
 - 读取授权链接
 - 如果页面是 502，会重新打开配置的 OAuth 页面而不是原地卡死

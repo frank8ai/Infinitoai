@@ -10,6 +10,7 @@
   const DEFAULT_AUTO_RUN_COUNT = 1;
   const DEFAULT_AUTO_RUN_INFINITE = false;
   const DEFAULT_AUTO_ROTATE_MAIL_PROVIDER = false;
+  const DEFAULT_ACCOUNT_SUCCESS_ONLY = true;
   const DEFAULT_MAIL_PROVIDER = '163';
   const DEFAULT_EMAIL_SOURCE = 'cloudmail';
   const DEFAULT_SIGNUP_ENTRY = 'platform';
@@ -22,8 +23,14 @@
   const DEFAULT_CLOUDMAIL_DOMAINS = 'coffeejadore.com';
   const DEFAULT_CLOUDMAIL_SUBDOMAIN = '';
   const DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN = false;
+  const DEFAULT_OAUTH_BACKEND = 'codex2api';
+  const DEFAULT_CODEX2API_BASE_URL = 'https://codex2api.bitpowerhub.com';
+  const DEFAULT_CODEX2API_ADMIN_KEY = 'IJ8G44_1UHGC_2522FsQA-rxTJLqZ1dX';
+  const DEFAULT_CODEX2API_PROXY_URL = '';
+  const DEFAULT_CODEX2API_ACCOUNT_NAME = 'm1n1ewx@coffeejadore.com';
   const PERSISTED_TOP_SETTING_KEYS = [
     'vpsUrl',
+    'vpsCpaPassword',
     'signupEntry',
     'browserBackend',
     'fingerprintProvider',
@@ -49,6 +56,7 @@
     'autoRunCount',
     'autoRunInfinite',
     'autoRotateMailProvider',
+    'accountSuccessOnly',
   ];
 
   function sanitizeAutoRunCount(value) {
@@ -80,6 +88,18 @@
     return Boolean(value);
   }
 
+  function sanitizeAccountSuccessOnly(value) {
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true') return true;
+      if (normalized === 'false' || normalized === '') return false;
+    }
+    if (value === undefined || value === null) {
+      return DEFAULT_ACCOUNT_SUCCESS_ONLY;
+    }
+    return Boolean(value);
+  }
+
   function sanitizeMailProvider(value) {
     return value === 'qq' || value === '163' || value === 'inbucket'
       ? value
@@ -93,7 +113,7 @@
   }
 
   function sanitizeOAuthBackend(value) {
-    return value === 'codex2api' ? 'codex2api' : 'vps';
+    return value === 'vps' ? 'vps' : DEFAULT_OAUTH_BACKEND;
   }
 
   function sanitizeSignupEntry(value) {
@@ -137,6 +157,7 @@
   function normalizePersistentSettings(value = {}) {
     return {
       vpsUrl: typeof value.vpsUrl === 'string' ? value.vpsUrl : '',
+      vpsCpaPassword: typeof value.vpsCpaPassword === 'string' ? value.vpsCpaPassword : '',
       signupEntry: sanitizeSignupEntry(value.signupEntry),
       browserBackend: sanitizeBrowserBackend(value.browserBackend),
       fingerprintProvider: sanitizeFingerprintProvider(value.fingerprintProvider),
@@ -157,13 +178,14 @@
       cloudMailSubdomain: typeof value.cloudMailSubdomain === 'string' ? value.cloudMailSubdomain : DEFAULT_CLOUDMAIL_SUBDOMAIN,
       cloudMailEnableRandomSubdomain: sanitizeCloudMailEnableRandomSubdomain(value.cloudMailEnableRandomSubdomain),
       oauthBackend: sanitizeOAuthBackend(value.oauthBackend),
-      codex2ApiBaseUrl: typeof value.codex2ApiBaseUrl === 'string' ? value.codex2ApiBaseUrl : '',
-      codex2ApiAdminKey: typeof value.codex2ApiAdminKey === 'string' ? value.codex2ApiAdminKey : '',
-      codex2ApiProxyUrl: typeof value.codex2ApiProxyUrl === 'string' ? value.codex2ApiProxyUrl : '',
-      codex2ApiAccountName: typeof value.codex2ApiAccountName === 'string' ? value.codex2ApiAccountName : '',
+      codex2ApiBaseUrl: sanitizePresetString(value.codex2ApiBaseUrl, DEFAULT_CODEX2API_BASE_URL),
+      codex2ApiAdminKey: sanitizePresetString(value.codex2ApiAdminKey, DEFAULT_CODEX2API_ADMIN_KEY),
+      codex2ApiProxyUrl: typeof value.codex2ApiProxyUrl === 'string' ? value.codex2ApiProxyUrl : DEFAULT_CODEX2API_PROXY_URL,
+      codex2ApiAccountName: sanitizePresetString(value.codex2ApiAccountName, DEFAULT_CODEX2API_ACCOUNT_NAME),
       autoRunCount: sanitizeAutoRunCount(value.autoRunCount),
       autoRunInfinite: sanitizeInfiniteAutoRun(value.autoRunInfinite),
       autoRotateMailProvider: sanitizeAutoRotateMailProvider(value.autoRotateMailProvider),
+      accountSuccessOnly: sanitizeAccountSuccessOnly(value.accountSuccessOnly),
     };
   }
 
@@ -172,6 +194,7 @@
     return {
       ...normalized,
       vpsUrl: normalized.vpsUrl.trim(),
+      vpsCpaPassword: normalized.vpsCpaPassword.trim(),
       roxyApiBaseUrl: normalized.roxyApiBaseUrl.trim().replace(/\/+$/, '') || DEFAULT_ROXY_API_BASE_URL,
       roxyApiToken: normalized.roxyApiToken.trim(),
       roxyWorkspaceId: normalized.roxyWorkspaceId.trim(),
@@ -237,24 +260,31 @@
 
   return {
     buildTopSettingPayload,
+    DEFAULT_ACCOUNT_SUCCESS_ONLY,
     DEFAULT_AUTO_RUN_COUNT,
     DEFAULT_AUTO_RUN_INFINITE,
     DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
     DEFAULT_BROWSER_BACKEND,
-    DEFAULT_CLOUDMAIL_ADMIN_PASSWORD,
     DEFAULT_CLOUDMAIL_ADMIN_EMAIL,
+    DEFAULT_CLOUDMAIL_ADMIN_PASSWORD,
     DEFAULT_CLOUDMAIL_BASE_URL,
     DEFAULT_CLOUDMAIL_DOMAINS,
     DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN,
     DEFAULT_CLOUDMAIL_SUBDOMAIN,
+    DEFAULT_CODEX2API_ACCOUNT_NAME,
+    DEFAULT_CODEX2API_ADMIN_KEY,
+    DEFAULT_CODEX2API_BASE_URL,
+    DEFAULT_CODEX2API_PROXY_URL,
     DEFAULT_EMAIL_SOURCE,
     DEFAULT_FINGERPRINT_PROVIDER,
+    DEFAULT_OAUTH_BACKEND,
     DEFAULT_ROXY_API_BASE_URL,
     DEFAULT_SIGNUP_ENTRY,
     PERSISTED_TOP_SETTING_KEYS,
     getAutoContinueHint,
     getEmailInputPlaceholder,
     normalizePersistentSettings,
+    sanitizeAccountSuccessOnly,
     sanitizeAutoRunCount,
     sanitizeAutoRotateMailProvider,
     sanitizeBrowserBackend,
