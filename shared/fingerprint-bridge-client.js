@@ -106,8 +106,41 @@
     };
   }
 
+  function validateFingerprintBridgeHealth(health, config = {}) {
+    if (!health || typeof health !== 'object') {
+      throw new Error('Fingerprint bridge health check returned an invalid response.');
+    }
+
+    if (health.ok === false || (health.bridge?.status && health.bridge.status !== 'ok')) {
+      const detail = String(health.bridge?.message || health.error || '').trim();
+      throw new Error(`Fingerprint bridge is not ready${detail ? `: ${detail}` : '.'}`);
+    }
+
+    const roxy = health.roxy || {};
+    const roxyConfig = config.roxy || {};
+    const roxyApiBaseUrl = normalizeFingerprintBridgeBaseUrl(roxyConfig.apiBaseUrl || DEFAULT_FINGERPRINT_BRIDGE_BASE_URL)
+      .replace(/:50001$/, ':50000');
+    const workspaceId = String(roxyConfig.workspaceId || '').trim();
+
+    if (!workspaceId) {
+      throw new Error('Fingerprint browser is not ready: Roxy workspace id is missing. Fill Workspace in the Fingerprint settings, then retry.');
+    }
+
+    if (roxy.reachable === false) {
+      const detail = String(roxy.message || '').trim();
+      throw new Error(`Fingerprint browser is not ready: Roxy API is unreachable at ${roxyApiBaseUrl}${detail ? ` (${detail})` : ''}. Start RoxyBrowser local API, then retry.`);
+    }
+
+    return true;
+  }
+
   async function getFingerprintBridgeHealth(options = {}) {
-    return await bridgeRequest('/health', {
+    const params = new URLSearchParams();
+    if (options.roxyApiBaseUrl) {
+      params.set('roxyApiBaseUrl', String(options.roxyApiBaseUrl).trim().replace(/\/+$/, ''));
+    }
+
+    return await bridgeRequest(`/health${params.size ? `?${params.toString()}` : ''}`, {
       ...options,
       method: 'GET',
       label: 'Fingerprint bridge health check',
@@ -167,5 +200,6 @@
     getFingerprintRunEvents,
     normalizeFingerprintBridgeBaseUrl,
     stopFingerprintRun,
+    validateFingerprintBridgeHealth,
   };
 });

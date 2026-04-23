@@ -8,7 +8,9 @@
   root.MailMatching = exports;
 })(typeof globalThis !== 'undefined' ? globalThis : self, function() {
   const BRAND_PATTERN = '(?:chatgpt|openai)';
-  const REGISTRATION_CN_SUBJECT = new RegExp(`你的\\s*${BRAND_PATTERN}\\s*代码为`, 'i');
+  const REGISTRATION_CN_SUBJECT = new RegExp(`[你您]的\\s*${BRAND_PATTERN}\\s*代码为`, 'i');
+  const TEMPORARY_OPENAI_CN_SUBJECT = /[你您]的\s*(?:临时\s*)?openai\s*验证码/i;
+  const TEMPORARY_CHATGPT_LOGIN_CN_SUBJECT = /[你您]的\s*(?:临时\s*)?chatgpt\s*登录代码/i;
   const VERIFICATION_EN_SUBJECT = new RegExp(`your\\s*${BRAND_PATTERN}\\s*code\\s*is`, 'i');
   const LOGIN_INTENT_PATTERNS = [
     /\b(?:log(?:[\s-]*in)|login|sign(?:[\s-]*in)|signin)\b/i,
@@ -28,15 +30,15 @@
 
   const STEP_MAIL_MATCH_PROFILES = {
     4: {
-      include: [REGISTRATION_CN_SUBJECT, VERIFICATION_EN_SUBJECT],
+      include: [REGISTRATION_CN_SUBJECT, TEMPORARY_OPENAI_CN_SUBJECT, VERIFICATION_EN_SUBJECT],
       exclude: [],
     },
     7: {
-      include: [REGISTRATION_CN_SUBJECT, VERIFICATION_EN_SUBJECT],
+      include: [REGISTRATION_CN_SUBJECT, TEMPORARY_OPENAI_CN_SUBJECT, TEMPORARY_CHATGPT_LOGIN_CN_SUBJECT, VERIFICATION_EN_SUBJECT],
       exclude: [],
     },
     9: {
-      include: [REGISTRATION_CN_SUBJECT, VERIFICATION_EN_SUBJECT],
+      include: [REGISTRATION_CN_SUBJECT, TEMPORARY_OPENAI_CN_SUBJECT, TEMPORARY_CHATGPT_LOGIN_CN_SUBJECT, VERIFICATION_EN_SUBJECT],
       exclude: [],
     },
   };

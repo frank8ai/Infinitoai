@@ -11,15 +11,17 @@
   const DEFAULT_AUTO_RUN_INFINITE = false;
   const DEFAULT_AUTO_ROTATE_MAIL_PROVIDER = false;
   const DEFAULT_MAIL_PROVIDER = '163';
-  const DEFAULT_EMAIL_SOURCE = 'tmailor';
+  const DEFAULT_EMAIL_SOURCE = 'cloudmail';
   const DEFAULT_SIGNUP_ENTRY = 'platform';
   const DEFAULT_BROWSER_BACKEND = 'extension';
   const DEFAULT_FINGERPRINT_PROVIDER = 'roxy';
   const DEFAULT_ROXY_API_BASE_URL = 'http://127.0.0.1:50000';
   const DEFAULT_CLOUDMAIL_BASE_URL = 'https://temp-email-api.bitpowerhub.com';
-  const DEFAULT_CLOUDMAIL_DOMAINS = 'beta.bitpowerhub.com, assets.bitpowerhub.com, docs.finchaintalk.com, alpha.yzw.io, alpha.tokenflowpay.com';
+  const DEFAULT_CLOUDMAIL_ADMIN_EMAIL = 'm1n1ewx@coffeejadore.com';
+  const DEFAULT_CLOUDMAIL_ADMIN_PASSWORD = 'iqAdlveWP/G9ldZRMYXXXh711EWlek4p';
+  const DEFAULT_CLOUDMAIL_DOMAINS = 'coffeejadore.com';
   const DEFAULT_CLOUDMAIL_SUBDOMAIN = '';
-  const DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN = true;
+  const DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN = false;
   const PERSISTED_TOP_SETTING_KEYS = [
     'vpsUrl',
     'signupEntry',
@@ -149,8 +151,8 @@
       inbucketHost: typeof value.inbucketHost === 'string' ? value.inbucketHost : '',
       inbucketMailbox: typeof value.inbucketMailbox === 'string' ? value.inbucketMailbox : '',
       cloudMailBaseUrl: sanitizePresetString(value.cloudMailBaseUrl, DEFAULT_CLOUDMAIL_BASE_URL),
-      cloudMailAdminEmail: typeof value.cloudMailAdminEmail === 'string' ? value.cloudMailAdminEmail : '',
-      cloudMailAdminPassword: typeof value.cloudMailAdminPassword === 'string' ? value.cloudMailAdminPassword : '',
+      cloudMailAdminEmail: typeof value.cloudMailAdminEmail === 'string' ? value.cloudMailAdminEmail : DEFAULT_CLOUDMAIL_ADMIN_EMAIL,
+      cloudMailAdminPassword: typeof value.cloudMailAdminPassword === 'string' ? value.cloudMailAdminPassword : DEFAULT_CLOUDMAIL_ADMIN_PASSWORD,
       cloudMailDomains: sanitizePresetString(value.cloudMailDomains, DEFAULT_CLOUDMAIL_DOMAINS),
       cloudMailSubdomain: typeof value.cloudMailSubdomain === 'string' ? value.cloudMailSubdomain : DEFAULT_CLOUDMAIL_SUBDOMAIN,
       cloudMailEnableRandomSubdomain: sanitizeCloudMailEnableRandomSubdomain(value.cloudMailEnableRandomSubdomain),
@@ -202,7 +204,7 @@
       return 'Paste the generated TMailor address here manually';
     }
     if (normalizedSource === 'cloudmail') {
-      return 'CloudMail will generate an address automatically';
+      return 'TempMail will generate an address automatically';
     }
 
     return 'Paste DuckDuckGo email';
@@ -227,7 +229,7 @@
       return 'Click New Email on TMailor, then paste the generated address into Email. Auto run will resume automatically.';
     }
     if (normalizedSource === 'cloudmail') {
-      return 'Use Auto to generate a CloudMail address and poll codes through the API.';
+      return 'Use Auto to generate a TempMail address and poll codes through the API.';
     }
 
     return 'Use Auto to fetch Duck email, or paste manually, then continue';
@@ -239,6 +241,8 @@
     DEFAULT_AUTO_RUN_INFINITE,
     DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
     DEFAULT_BROWSER_BACKEND,
+    DEFAULT_CLOUDMAIL_ADMIN_PASSWORD,
+    DEFAULT_CLOUDMAIL_ADMIN_EMAIL,
     DEFAULT_CLOUDMAIL_BASE_URL,
     DEFAULT_CLOUDMAIL_DOMAINS,
     DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN,

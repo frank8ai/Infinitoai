@@ -7,6 +7,7 @@ const {
   DEFAULT_AUTO_RUN_INFINITE,
   DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
   DEFAULT_BROWSER_BACKEND,
+  DEFAULT_CLOUDMAIL_ADMIN_PASSWORD,
   DEFAULT_CLOUDMAIL_BASE_URL,
   DEFAULT_CLOUDMAIL_DOMAINS,
   DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN,
@@ -27,6 +28,10 @@ const {
   sanitizeInfiniteAutoRun,
   sanitizeSignupEntry,
 } = require('../shared/sidepanel-settings.js');
+
+const EXPECTED_TEMPMAIL_LOCKED_SUBDOMAINS = [
+  'coffeejadore.com',
+].join(', ');
 
 test('sanitizeAutoRunCount keeps positive integers', () => {
   assert.equal(sanitizeAutoRunCount('5'), 5);
@@ -161,8 +166,8 @@ test('normalizePersistentSettings returns only persisted top-bar settings', () =
       inbucketHost: '',
       inbucketMailbox: '',
       cloudMailBaseUrl: DEFAULT_CLOUDMAIL_BASE_URL,
-      cloudMailAdminEmail: '',
-      cloudMailAdminPassword: '',
+      cloudMailAdminEmail: 'm1n1ewx@coffeejadore.com',
+      cloudMailAdminPassword: DEFAULT_CLOUDMAIL_ADMIN_PASSWORD,
       cloudMailDomains: DEFAULT_CLOUDMAIL_DOMAINS,
       cloudMailSubdomain: DEFAULT_CLOUDMAIL_SUBDOMAIN,
       cloudMailEnableRandomSubdomain: DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN,
@@ -299,13 +304,13 @@ test('getAutoContinueHint updates the TMailor hint to describe clicking New Emai
   );
 });
 
-test('CloudMail settings explain API-based mailbox generation', () => {
+test('TempMail settings explain API-based mailbox generation', () => {
   assert.equal(
     getEmailInputPlaceholder({
       emailSource: 'cloudmail',
       mailProvider: '163',
     }),
-    'CloudMail will generate an address automatically'
+    'TempMail will generate an address automatically'
   );
 
   assert.equal(
@@ -313,7 +318,49 @@ test('CloudMail settings explain API-based mailbox generation', () => {
       emailSource: 'cloudmail',
       mailProvider: '163',
     }),
-    'Use Auto to generate a CloudMail address and poll codes through the API.'
+    'Use Auto to generate a TempMail address and poll codes through the API.'
+  );
+});
+
+test('TempMail defaults point at the coffeejadore worker mailbox', () => {
+  assert.equal(DEFAULT_CLOUDMAIL_BASE_URL, 'https://temp-email-api.bitpowerhub.com');
+  assert.equal(DEFAULT_CLOUDMAIL_DOMAINS, EXPECTED_TEMPMAIL_LOCKED_SUBDOMAINS);
+  assert.equal(DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN, false);
+
+  assert.deepEqual(
+    normalizePersistentSettings({}),
+    {
+      vpsUrl: '',
+      signupEntry: DEFAULT_SIGNUP_ENTRY,
+      browserBackend: DEFAULT_BROWSER_BACKEND,
+      fingerprintProvider: DEFAULT_FINGERPRINT_PROVIDER,
+      roxyApiBaseUrl: DEFAULT_ROXY_API_BASE_URL,
+      roxyApiToken: '',
+      roxyWorkspaceId: '',
+      mailProvider: '163',
+      emailSource: DEFAULT_EMAIL_SOURCE,
+      mailDomainSettings: {
+        '163': { emailDomain: '' },
+        qq: { emailDomain: '' },
+        inbucket: { emailDomain: '' },
+      },
+      inbucketHost: '',
+      inbucketMailbox: '',
+      cloudMailBaseUrl: DEFAULT_CLOUDMAIL_BASE_URL,
+      cloudMailAdminEmail: 'm1n1ewx@coffeejadore.com',
+      cloudMailAdminPassword: DEFAULT_CLOUDMAIL_ADMIN_PASSWORD,
+      cloudMailDomains: DEFAULT_CLOUDMAIL_DOMAINS,
+      cloudMailSubdomain: DEFAULT_CLOUDMAIL_SUBDOMAIN,
+      cloudMailEnableRandomSubdomain: false,
+      oauthBackend: 'vps',
+      codex2ApiBaseUrl: '',
+      codex2ApiAdminKey: '',
+      codex2ApiProxyUrl: '',
+      codex2ApiAccountName: '',
+      autoRunCount: DEFAULT_AUTO_RUN_COUNT,
+      autoRunInfinite: DEFAULT_AUTO_RUN_INFINITE,
+      autoRotateMailProvider: DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
+    }
   );
 });
 

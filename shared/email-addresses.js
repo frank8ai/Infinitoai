@@ -7,7 +7,7 @@
 
   root.EmailAddresses = exports;
 })(typeof globalThis !== 'undefined' ? globalThis : self, function() {
-  const DEFAULT_EMAIL_SOURCE = 'tmailor';
+  const DEFAULT_EMAIL_SOURCE = 'cloudmail';
   const DEFAULT_33MAIL_DOMAIN_SETTINGS = Object.freeze({
     '163': { emailDomain: '' },
     qq: { emailDomain: '' },

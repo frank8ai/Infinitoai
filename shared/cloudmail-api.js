@@ -144,6 +144,38 @@
     return `${localPart}@${resolvedDomain}`;
   }
 
+  function parseCloudMailAddress(value) {
+    const match = String(value || '').trim().toLowerCase().match(/^([a-z0-9._-]+)@([a-z0-9.-]+\.[a-z]{2,})$/i);
+    if (!match) {
+      return null;
+    }
+    return {
+      localPart: match[1],
+      domain: match[2],
+    };
+  }
+
+  function getResolvedCloudMailDomain(config, domain) {
+    return config.subdomain ? `${config.subdomain}.${domain}` : domain;
+  }
+
+  function getFixedCloudMailAddress(config) {
+    const address = parseCloudMailAddress(config.adminEmail);
+    if (!address) {
+      return null;
+    }
+    const configuredDomain = config.domains.find((domain) => (
+      address.domain === domain || address.domain === getResolvedCloudMailDomain(config, domain)
+    ));
+    if (!configuredDomain) {
+      return null;
+    }
+    return {
+      localPart: address.localPart,
+      domain: configuredDomain,
+    };
+  }
+
   function getFetch(fetchImpl) {
     const resolved = fetchImpl || (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
     if (!resolved) {
@@ -179,7 +211,16 @@
       json = null;
     }
     if (!response.ok) {
-      throw new Error(`${label} failed (${response.status}).`);
+      const details = [
+        json?.error,
+        json?.message,
+        json?.msg,
+        typeof text === 'string' ? text.trim() : '',
+      ]
+        .map((value) => String(value || '').trim())
+        .find(Boolean);
+      const suffix = details ? `: ${details}` : '.';
+      throw new Error(`${label} failed (${response.status})${suffix}`);
     }
     if (!json || typeof json !== 'object') {
       throw new Error(`${label} returned an invalid JSON payload.`);
@@ -200,12 +241,13 @@
     const config = normalizeCloudMailConfig(configValue);
     assertCloudMailAddressConfig(config);
     const doFetch = getFetch(options.fetchImpl);
+    const fixedAddress = getFixedCloudMailAddress(config);
     const localPart = options.localPart
       ? String(options.localPart).trim().replace(/[^a-z0-9._-]/gi, '').toLowerCase()
-      : generateCloudMailLocalPart(options);
+      : fixedAddress?.localPart || generateCloudMailLocalPart(options);
     const preferredDomain = options.domain
       ? String(options.domain).trim().replace(/^@+/, '').toLowerCase()
-      : '';
+      : fixedAddress?.domain || '';
     const domains = preferredDomain
       ? [preferredDomain, ...config.domains.filter((domain) => domain !== preferredDomain)]
       : config.domains.slice();
@@ -276,6 +318,15 @@
     return String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
+  function getRawBody(raw) {
+    const text = String(raw || '');
+    const separatorIndex = text.search(/\r?\n\r?\n/);
+    if (separatorIndex < 0) {
+      return '';
+    }
+    return text.slice(separatorIndex).replace(/^\r?\n\r?\n/, '');
+  }
+
   function decodeBytes(bytes, charset = 'utf-8') {
     if (!bytes.length) return '';
     const normalizedCharset = String(charset || 'utf-8').trim() || 'utf-8';
@@ -312,6 +363,20 @@
     return decodeBytes(bytes, charset);
   }
 
+  function decodeQuotedPrintableBody(encoded, charset) {
+    const value = String(encoded || '').replace(/=\r?\n/g, '');
+    const bytes = [];
+    for (let i = 0; i < value.length; i += 1) {
+      if (value[i] === '=' && /^[0-9a-f]{2}$/i.test(value.slice(i + 1, i + 3))) {
+        bytes.push(Number.parseInt(value.slice(i + 1, i + 3), 16));
+        i += 2;
+      } else {
+        bytes.push(value.charCodeAt(i) & 0xff);
+      }
+    }
+    return decodeBytes(bytes, charset);
+  }
+
   function decodeMimeHeader(value) {
     return String(value || '')
       .replace(/\r?\n[\t ]+/g, ' ')
@@ -333,6 +398,25 @@
     const escapedName = String(headerName || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const match = String(raw || '').match(new RegExp(`^${escapedName}:\\s*([^\\r\\n]*(?:\\r?\\n[\\t ][^\\r\\n]*)*)`, 'im'));
     return match ? decodeMimeHeader(match[1]) : '';
+  }
+
+  function decodeRawMimeBody(raw) {
+    const text = String(raw || '');
+    if (!text) {
+      return '';
+    }
+    const body = getRawBody(text);
+    if (!body) {
+      return '';
+    }
+    const contentType = getRawHeader(text, 'content-type');
+    const charsetMatch = String(contentType || '').match(/charset\s*=\s*["']?([^;"'\s]+)/i);
+    const charset = charsetMatch ? charsetMatch[1] : 'utf-8';
+    const transferEncoding = getRawHeader(text, 'content-transfer-encoding').toLowerCase();
+    if (transferEncoding.includes('quoted-printable')) {
+      return decodeQuotedPrintableBody(body, charset);
+    }
+    return decodeBytes(Array.from(body, (char) => char.charCodeAt(0) & 0xff), charset);
   }
 
   function extractEmailAddress(value) {
@@ -358,7 +442,8 @@
 
   function normalizeCloudMailItem(item = {}) {
     const raw = String(item.raw || item.source_raw || '');
-    const content = decodeMimeHeader(stripHtml(item.content || item.text || item.html || item.body || raw));
+    const decodedRawBody = decodeRawMimeBody(raw);
+    const content = decodeMimeHeader(stripHtml(item.content || item.text || item.html || item.body || decodedRawBody || raw));
     const rawSubject = getRawHeader(raw, 'subject');
     const rawSender = getRawHeader(raw, 'from');
     const rawTo = getRawHeader(raw, 'to');

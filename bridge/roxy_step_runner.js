@@ -20,7 +20,11 @@ async function getPlaywright() {
   try {
     return require('playwright');
   } catch (error) {
-    throw new Error(`Fingerprint step runner requires Playwright: ${error.message}`);
+    try {
+      return require('playwright-core');
+    } catch (coreError) {
+      throw new Error(`Fingerprint step runner requires Playwright or Playwright Core: ${error.message}; ${coreError.message}`);
+    }
   }
 }
 

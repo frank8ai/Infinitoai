@@ -62,6 +62,46 @@ test('background includes fingerprint bridge lifecycle helpers and step dispatch
   assert.match(backgroundSource, /if \(isFingerprintBrowserBackend\(state\)\) \{[\s\S]*completeFingerprintBridgeStep\(8,\s*state/i);
 });
 
+test('background clears fingerprint bridge runs on stop and reset before reusing state', () => {
+  const backgroundSource = readProjectFile('background.js');
+
+  assert.match(
+    backgroundSource,
+    /case 'RESET': \{[\s\S]*const state = await getState\(\);[\s\S]*await deleteFingerprintBridgeRunIfNeeded\(state\);[\s\S]*await resetState\(\);/
+  );
+  assert.match(
+    backgroundSource,
+    /async function abortCurrentAutoRunRound\(options = \{\}\) \{[\s\S]*const state = await getState\(\);[\s\S]*await deleteFingerprintBridgeRunIfNeeded\(state\);/
+  );
+  assert.match(
+    backgroundSource,
+    /async function stopFingerprintBridgeRunIfNeeded\(state = null\) \{[\s\S]*await setState\(\{[\s\S]*fingerprintRunId: '',[\s\S]*fingerprintBridgeEventCursor: 0,/
+  );
+});
+
+test('package.json exposes a default test script for local verification', () => {
+  const manifest = JSON.parse(readProjectFile('package.json'));
+  assert.equal(typeof manifest.scripts?.test, 'string');
+  assert.match(manifest.scripts.test, /node --test/);
+});
+
+test('side panel labels Cloudflare Worker mail as TempMail', () => {
+  const html = readProjectFile(path.join('sidepanel', 'sidepanel.html'));
+
+  assert.match(html, /TempMail（自部署 Cloudflare Worker）/);
+  assert.match(html, /Locked subdomains/);
+  assert.doesNotMatch(html, /CloudMail（API 接码）/);
+});
+
+test('background keeps fingerprint cleanup retryable when deletion fails', () => {
+  const backgroundSource = readProjectFile('background.js');
+
+  assert.match(
+    backgroundSource,
+    /async function deleteFingerprintBridgeRunIfNeeded\(state = null\) \{[\s\S]*let deleted = false;[\s\S]*deleted = true;[\s\S]*if \(!deleted\) \{[\s\S]*return false;[\s\S]*await setState\(\{[\s\S]*fingerprintRunId: '',/
+  );
+});
+
 test('fingerprint step 3 prepares generated mailbox sources before calling the bridge', () => {
   const backgroundSource = readProjectFile('background.js');
 
@@ -117,6 +157,7 @@ test('fingerprint bridge client and local bridge service exist with roxy adapter
 test('fingerprint step runner includes ChatGPT auth-error and auth-bridge recovery logic', () => {
   const stepRunner = readProjectFile(path.join('bridge', 'roxy_step_runner.js'));
 
+  assert.match(stepRunner, /require\('playwright-core'\)/);
   assert.match(stepRunner, /function isChatgptAuthErrorUrl/);
   assert.match(stepRunner, /function isChatgptLoginWithUrl/);
   assert.match(stepRunner, /async function isChatgptChallengePage/);

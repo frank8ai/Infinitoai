@@ -127,19 +127,20 @@ Step 1 和 Step 9 都依赖这个地址。
 `Codex2API` 模式下，Step 1 会调用 Codex2API 接口生成 OpenAI 授权链接；Step 9 会把 localhost callback 提交给 Codex2API，由 Codex2API 自己换 token 并加入号池。
 这种模式不需要打开旧 VPS 面板。
 
-### `CloudMail`
+### `TempMail`
 
-当 `Source = CloudMail` 时，需要填写：
+当 `Source = TempMail` 时，需要填写：
 
-- `API`：CloudMail Worker 地址，例如 `https://temp-email-api.bitpowerhub.com`
-- `Password`：CloudMail admin 密码
-- `Domains`：可用邮箱域名，多个域名用英文逗号分隔。默认预设已切到你自己的域名池，例如 `beta.bitpowerhub.com, assets.bitpowerhub.com, docs.finchaintalk.com, alpha.yzw.io, alpha.tokenflowpay.com`
+- `API`：TempMail Worker 地址，例如 `https://temp-email-api.bitpowerhub.com`
+- `Password`：TempMail admin 密码
+- `Admin Email`：可选；填写完整邮箱时，会优先用这个邮箱名创建地址
+- `Domains`：可用邮箱域名，多个域名用英文逗号分隔。默认预设为 `coffeejadore.com`
 - `Subdomain`：可选；填写后会生成 `name@subdomain.domain` 形式的邮箱
-- `Random subdomain`：可选；开启后会把 `Domains` 里的域名当作“基础域名”，交给 CloudMail Worker 自动分配随机四级子域，例如 `name@abc123.alpha.yzw.io`
+- `Random subdomain`：可选；默认关闭。只有在你明确要把 `Domains` 里的域名当作“基础域名”时才开启，让 TempMail Worker 自动分配更深一层的随机子域
 
-CloudMail 会在 Step 3 前自动创建邮箱；无论是扩展模式还是指纹浏览器模式，都会先把邮箱和密码准备好，再继续 Step 3，并在 Step 4 / Step 7 通过后台 API 查验证码。
-CloudMail admin 密码只保存在可信配置里，不会发给内容脚本，也不会出现在普通日志或状态广播中。
-如果你要跑随机四级域名，不要手工把随机前缀直接写进 `Domains`；应当填写 Worker `open_api/settings` 返回的 `randomSubdomainDomains` 里的基础域名，再开启 `Random subdomain`。
+TempMail 会在 Step 3 前自动创建邮箱；无论是扩展模式还是指纹浏览器模式，都会先把邮箱和密码准备好，再继续 Step 3，并在 Step 4 / Step 7 通过后台 API 查验证码。
+TempMail admin 密码只保存在可信配置里，不会发给内容脚本，也不会出现在普通日志或状态广播中。
+如果你要跑 Worker 随机子域，不要手工把随机前缀直接写进 `Domains`；应当填写基础域名，再开启 `Random subdomain`。
 
 ### `Mail`
 

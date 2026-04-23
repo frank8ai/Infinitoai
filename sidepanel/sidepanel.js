@@ -796,7 +796,7 @@ function updateBrowserBackendUI() {
 function getEmailSourceLabel() {
   if (selectEmailSource.value === '33mail') return '33mail';
   if (selectEmailSource.value === 'tmailor') return 'TMailor';
-  if (selectEmailSource.value === 'cloudmail') return 'CloudMail';
+  if (selectEmailSource.value === 'cloudmail') return 'TempMail';
   return 'Duck';
 }
 

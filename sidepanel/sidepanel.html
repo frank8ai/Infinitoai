@@ -198,7 +198,7 @@
         <div class="data-select-shell">
           <select id="select-email-source" class="data-select">
             <option value="tmailor">TMailor（推荐）</option>
-            <option value="cloudmail">CloudMail（API 接码）</option>
+            <option value="cloudmail">TempMail（自部署 Cloudflare Worker）</option>
             <option value="duck">Duck Address（邮件延迟）</option>
             <option value="33mail">33mail（干净ip）</option>
           </select>
@@ -238,7 +238,7 @@
         <input type="text" id="input-inbucket-mailbox" class="data-input" placeholder="e.g. zju2001" />
       </div>
       <div class="data-row data-row-stack" id="row-cloudmail-settings" style="display:none;">
-        <span class="data-label">CloudMail</span>
+        <span class="data-label">TempMail</span>
         <div class="mail-domain-groups">
           <label class="mail-domain-group active">
             <span class="mail-domain-title">API</span>
@@ -246,15 +246,15 @@
           </label>
           <label class="mail-domain-group active">
             <span class="mail-domain-title">Admin Email</span>
-            <input type="text" id="input-cloudmail-admin-email" class="data-input" placeholder="optional for some CloudMail APIs" />
+            <input type="text" id="input-cloudmail-admin-email" class="data-input" placeholder="optional for some TempMail APIs" />
           </label>
           <label class="mail-domain-group active">
             <span class="mail-domain-title">Password</span>
-            <input type="password" id="input-cloudmail-admin-password" class="data-input" placeholder="CloudMail admin password" />
+            <input type="password" id="input-cloudmail-admin-password" class="data-input" placeholder="TempMail admin password" />
           </label>
           <label class="mail-domain-group active">
-            <span class="mail-domain-title">Domains</span>
-            <input type="text" id="input-cloudmail-domains" class="data-input" placeholder="beta.bitpowerhub.com, assets.bitpowerhub.com, docs.finchaintalk.com" />
+            <span class="mail-domain-title">Locked subdomains</span>
+            <input type="text" id="input-cloudmail-domains" class="data-input" placeholder="coffeejadore.com" />
           </label>
           <label class="mail-domain-group active">
             <span class="mail-domain-title">Subdomain</span>
@@ -262,7 +262,7 @@
           </label>
           <label class="checkbox-inline">
             <input type="checkbox" id="input-cloudmail-random-subdomain" />
-            <span>Random subdomain</span>
+            <span>Worker random subdomain</span>
           </label>
         </div>
       </div>

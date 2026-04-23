@@ -20,6 +20,15 @@ test('step 4 mail profile also accepts the Chinese OpenAI title', () => {
   assert.equal(matchesSubjectPatterns('你的 OpenAI 代码为 040535', profile), true);
 });
 
+test('step 4 mail profile accepts temporary Chinese OpenAI and ChatGPT titles', () => {
+  const step4Profile = getStepMailMatchProfile(4);
+  const step7Profile = getStepMailMatchProfile(7);
+
+  assert.equal(matchesSubjectPatterns('您的临时OpenAI验证码', step4Profile), true);
+  assert.equal(matchesSubjectPatterns('你的临时 ChatGPT 登录代码', step4Profile), false);
+  assert.equal(matchesSubjectPatterns('你的临时 ChatGPT 登录代码', step7Profile), true);
+});
+
 test('step 4 mail profile also accepts the English verification title', () => {
   const profile = getStepMailMatchProfile(4);
 

@@ -87,6 +87,7 @@ const {
   getFingerprintBridgeHealth,
   getFingerprintRunEvents,
   stopFingerprintRun,
+  validateFingerprintBridgeHealth,
 } = FingerprintBridgeClient;
 const {
   checkTmailorApiConnectivity,
@@ -109,6 +110,8 @@ const {
   DEFAULT_AUTO_RUN_INFINITE,
   DEFAULT_AUTO_ROTATE_MAIL_PROVIDER,
   DEFAULT_BROWSER_BACKEND,
+  DEFAULT_CLOUDMAIL_ADMIN_EMAIL,
+  DEFAULT_CLOUDMAIL_ADMIN_PASSWORD,
   DEFAULT_CLOUDMAIL_BASE_URL,
   DEFAULT_CLOUDMAIL_DOMAINS,
   DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN,
@@ -355,8 +358,8 @@ const DEFAULT_STATE = {
   inbucketHost: '',
   inbucketMailbox: '',
   cloudMailBaseUrl: DEFAULT_CLOUDMAIL_BASE_URL,
-  cloudMailAdminEmail: '',
-  cloudMailAdminPassword: '',
+  cloudMailAdminEmail: DEFAULT_CLOUDMAIL_ADMIN_EMAIL,
+  cloudMailAdminPassword: DEFAULT_CLOUDMAIL_ADMIN_PASSWORD,
   cloudMailDomains: DEFAULT_CLOUDMAIL_DOMAINS,
   cloudMailSubdomain: DEFAULT_CLOUDMAIL_SUBDOMAIN,
   cloudMailEnableRandomSubdomain: DEFAULT_CLOUDMAIL_ENABLE_RANDOM_SUBDOMAIN,
@@ -2049,6 +2052,8 @@ async function handleMessage(message, sender) {
 
     case 'RESET': {
       clearStopRequest();
+      const state = await getState();
+      await deleteFingerprintBridgeRunIfNeeded(state);
       await resetState();
       await addLog('流程已重置', 'info');
       return { ok: true };
@@ -2557,7 +2562,7 @@ async function abortCurrentAutoRunRound(options = {}) {
   }
   await broadcastStopToContentScripts();
   const state = await getState();
-  await stopFingerprintBridgeRunIfNeeded(state);
+  await deleteFingerprintBridgeRunIfNeeded(state);
 
   for (const waiter of stepWaiters.values()) {
     waiter.reject(new Error(STOP_ERROR_MESSAGE));
@@ -2617,12 +2622,15 @@ async function ensureFingerprintBridgeRun(state, options = {}) {
     return state;
   }
 
-  await getFingerprintBridgeHealth({
+  const runConfig = getFingerprintRunConfigFromState(state, options);
+  const health = await getFingerprintBridgeHealth({
     baseUrl: getFingerprintBridgeBaseUrl(),
+    roxyApiBaseUrl: runConfig.roxy?.apiBaseUrl,
   });
+  validateFingerprintBridgeHealth(health, runConfig);
 
   const response = await createFingerprintRun(
-    getFingerprintRunConfigFromState(state, options),
+    runConfig,
     {
       baseUrl: getFingerprintBridgeBaseUrl(),
       timeoutMs: 45000,
@@ -2651,26 +2659,40 @@ async function stopFingerprintBridgeRunIfNeeded(state = null) {
     });
     await appendFingerprintBridgeEvents(response.events);
   } catch {}
-}
-
-async function deleteFingerprintBridgeRunIfNeeded(state = null) {
-  const effectiveState = state || await getState();
-  if (!effectiveState?.fingerprintRunId) {
-    return;
-  }
-
-  try {
-    const response = await deleteFingerprintRun(effectiveState.fingerprintRunId, {
-      baseUrl: getFingerprintBridgeBaseUrl(),
-      timeoutMs: 10000,
-    });
-    await appendFingerprintBridgeEvents(response.events);
-  } catch {}
 
   await setState({
     fingerprintRunId: '',
     fingerprintBridgeEventCursor: 0,
   });
+}
+
+async function deleteFingerprintBridgeRunIfNeeded(state = null) {
+  const effectiveState = state || await getState();
+  if (!effectiveState?.fingerprintRunId) {
+    return true;
+  }
+
+  let deleted = false;
+  try {
+    const response = await deleteFingerprintRun(effectiveState.fingerprintRunId, {
+      baseUrl: getFingerprintBridgeBaseUrl(),
+      timeoutMs: 10000,
+    });
+    deleted = true;
+    try {
+      await appendFingerprintBridgeEvents(response.events);
+    } catch {}
+  } catch {}
+
+  if (!deleted) {
+    return false;
+  }
+
+  await setState({
+    fingerprintRunId: '',
+    fingerprintBridgeEventCursor: 0,
+  });
+  return true;
 }
 
 async function executeFingerprintBridgeStepWithState(step, state, payload = {}, options = {}) {
@@ -3063,7 +3085,7 @@ function getCodex2ApiOAuthConfigFromState(state = {}) {
 function getEmailSourceLabel(emailSource) {
   if (emailSource === '33mail') return '33mail';
   if (emailSource === 'tmailor') return 'TMailor';
-  if (emailSource === 'cloudmail') return 'CloudMail';
+  if (emailSource === 'cloudmail') return 'TempMail';
   return 'Duck Mail';
 }
 
@@ -3075,7 +3097,7 @@ function getEmailWaitHint(emailSource) {
     return 'Open TMailor and generate a supported mailbox, or switch to com+whitelist mode and continue';
   }
   if (emailSource === 'cloudmail') {
-    return 'Configure CloudMail API settings, then generate an email automatically';
+    return 'Configure TempMail API settings, then generate an email automatically';
   }
   return 'Fetch Duck email or paste manually, then continue';
 }

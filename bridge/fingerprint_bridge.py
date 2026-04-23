@@ -100,14 +100,26 @@ def _create_run(config: dict) -> RunState:
     adapter = _build_roxy_adapter(config)
     proxy_url = str(config.get("proxyUrl") or "")
     created = adapter.create_profile(proxy_url=proxy_url)
-    opened = adapter.open_profile(created["dir_id"])
+    profile_id = created["dir_id"]
+    try:
+        opened = adapter.open_profile(profile_id)
+    except Exception:
+        try:
+            adapter.close_profile(profile_id)
+        except Exception:
+            pass
+        try:
+            adapter.delete_profile(profile_id)
+        except Exception:
+            pass
+        raise
 
     run = RunState(
         run_id=uuid.uuid4().hex,
         config=config,
         provider=provider,
         adapter=adapter,
-        profile_id=created["dir_id"],
+        profile_id=profile_id,
         ws_endpoint=opened["ws_endpoint"],
     )
     run.append_event("info", f"Fingerprint run created with {provider} profile {run.profile_id}.", 0)
@@ -234,9 +246,11 @@ class FingerprintBridgeHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/health":
+            params = parse_qs(parsed.query)
+            roxy_api_base_url = str((params.get("roxyApiBaseUrl") or [DEFAULT_ROXY_API_BASE_URL])[0] or DEFAULT_ROXY_API_BASE_URL).strip()
             roxy_status = {"reachable": False, "message": ""}
             try:
-                adapter = RoxyAdapter(DEFAULT_ROXY_API_BASE_URL, "", "")
+                adapter = RoxyAdapter(roxy_api_base_url, "", "")
                 payload = adapter.health()
                 roxy_status = {
                     "reachable": True,
